@@ -1,10 +1,10 @@
 [package]
 name = "sak_rs"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 
 [features]
-all = ["os", "os_windows", "os_windows_input", "sync"]
+all = ["os", "os_windows", "os_windows_input", "sync", "message_dialog", "graceful_run"]
 
 os = []
 os_windows = ["os", "dep:windows"]
@@ -21,9 +21,14 @@ os_windows_input = [
 
 sync = ["dep:parking_lot"]
 
+message_dialog = ["dep:rfd"]
+
+graceful_run = ["message_dialog"]
+
 [dependencies]
 windows = { version = "0.60.0", default-features = false, optional = true }
 parking_lot = { version = "0.12.3", default-features = false, optional = true }
+rfd = { version = "0.15.2", default-features = false, optional = true }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
