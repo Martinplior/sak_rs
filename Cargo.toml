@@ -1,0 +1,32 @@
+[package]
+name = "sak_rs"
+version = "0.0.1"
+edition = "2024"
+
+[features]
+all = ["os", "os_windows", "os_windows_input", "sync"]
+
+os = []
+os_windows = ["os", "dep:windows"]
+os_windows_input = [
+    "os_windows",
+    "sync",
+    "windows/Win32_Foundation",
+    "windows/Win32_Graphics_Gdi",
+    "windows/Win32_Devices_HumanInterfaceDevice",
+    "windows/Win32_System_LibraryLoader",
+    "windows/Win32_UI_Input",
+    "windows/Win32_UI_WindowsAndMessaging",
+]
+
+sync = ["dep:parking_lot"]
+
+[dependencies]
+windows = { version = "0.60.0", default-features = false, optional = true }
+parking_lot = { version = "0.12.3", default-features = false, optional = true }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+unwrap_used = "warn"
