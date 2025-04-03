@@ -2,14 +2,22 @@ use std::mem::MaybeUninit;
 
 use windows::Win32::UI::{
     Input::{
-        GetRawInputData, HRAWINPUT, RAWHID, RAWINPUT, RAWINPUTHEADER, RAWKEYBOARD, RAWMOUSE,
-        RID_DEVICE_INFO_TYPE, RID_INPUT, RIM_TYPEHID, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
+        GetRawInputData, HRAWINPUT, KeyboardAndMouse::VIRTUAL_KEY, MOUSE_ATTRIBUTES_CHANGED,
+        MOUSE_MOVE_NOCOALESCE, MOUSE_VIRTUAL_DESKTOP, RAWHID, RAWINPUT, RAWINPUTHEADER,
+        RAWKEYBOARD, RAWMOUSE, RAWMOUSE_0_0, RID_DEVICE_INFO_TYPE, RID_INPUT, RIM_TYPEHID,
+        RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
     },
-    WindowsAndMessaging::MSG,
+    WindowsAndMessaging::{
+        MSG, RI_KEY_E0, RI_KEY_E1, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP,
+        RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL, RI_MOUSE_LEFT_BUTTON_DOWN,
+        RI_MOUSE_LEFT_BUTTON_UP, RI_MOUSE_MIDDLE_BUTTON_DOWN, RI_MOUSE_MIDDLE_BUTTON_UP,
+        RI_MOUSE_RIGHT_BUTTON_DOWN, RI_MOUSE_RIGHT_BUTTON_UP, RI_MOUSE_WHEEL,
+    },
 };
 
 use crate::os::windows::panic_from_win32;
 
+/// [see also](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawkeyboard)
 #[repr(C)]
 #[derive(Clone)]
 pub struct Keyboard {
@@ -17,6 +25,49 @@ pub struct Keyboard {
     pub data: RAWKEYBOARD,
 }
 
+impl Keyboard {
+    #[inline]
+    pub fn make_code(&self) -> u16 {
+        self.data.MakeCode
+    }
+
+    #[inline]
+    pub fn virtual_key(&self) -> VIRTUAL_KEY {
+        VIRTUAL_KEY(self.data.VKey)
+    }
+
+    #[inline]
+    pub fn message(&self) -> u32 {
+        self.data.Message
+    }
+
+    #[inline]
+    pub fn extra_information(&self) -> u32 {
+        self.data.ExtraInformation
+    }
+
+    #[inline]
+    pub fn key_is_down(&self) -> bool {
+        self.data.Flags & 1 == 0
+    }
+
+    #[inline]
+    pub fn key_is_up(&self) -> bool {
+        !self.key_is_down()
+    }
+
+    #[inline]
+    pub fn has_e0(&self) -> bool {
+        self.data.Flags & (RI_KEY_E0 as u16) != 0
+    }
+
+    #[inline]
+    pub fn has_e1(&self) -> bool {
+        self.data.Flags & (RI_KEY_E1 as u16) != 0
+    }
+}
+
+/// [see also](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawmouse)
 #[repr(C)]
 #[derive(Clone)]
 pub struct Mouse {
@@ -24,11 +75,136 @@ pub struct Mouse {
     pub data: RAWMOUSE,
 }
 
+impl Mouse {
+    #[inline]
+    pub fn is_move_relative(&self) -> bool {
+        self.data.usFlags.0 & 1 == 0
+    }
+
+    #[inline]
+    pub fn is_move_absolute(&self) -> bool {
+        !self.is_move_relative()
+    }
+
+    #[inline]
+    pub fn is_virtual_desktop(&self) -> bool {
+        self.data.usFlags.0 & MOUSE_VIRTUAL_DESKTOP.0 == 0
+    }
+
+    #[inline]
+    pub fn is_attributes_changed(&self) -> bool {
+        self.data.usFlags.0 & MOUSE_ATTRIBUTES_CHANGED.0 == 0
+    }
+
+    #[inline]
+    pub fn is_move_nocoalesce(&self) -> bool {
+        self.data.usFlags.0 & MOUSE_MOVE_NOCOALESCE.0 == 0
+    }
+
+    #[inline]
+    pub fn last_x(&self) -> i32 {
+        self.data.lLastX
+    }
+
+    #[inline]
+    pub fn last_y(&self) -> i32 {
+        self.data.lLastY
+    }
+
+    #[inline]
+    pub fn extra_information(&self) -> u32 {
+        self.data.ulExtraInformation
+    }
+
+    #[inline]
+    pub fn flags_and_data(&self) -> &RAWMOUSE_0_0 {
+        unsafe { &self.data.Anonymous.Anonymous }
+    }
+
+    #[inline]
+    pub fn button_data(&self) -> u16 {
+        self.flags_and_data().usButtonData
+    }
+
+    #[inline]
+    pub fn is_left_button_down(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_LEFT_BUTTON_DOWN as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_left_button_up(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_LEFT_BUTTON_UP as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_right_button_down(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_RIGHT_BUTTON_DOWN as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_right_button_up(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_RIGHT_BUTTON_UP as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_middle_button_down(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_MIDDLE_BUTTON_DOWN as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_middle_button_up(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_MIDDLE_BUTTON_UP as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_ext1_button_down(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_BUTTON_4_DOWN as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_ext1_button_up(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_BUTTON_4_UP as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_ext2_button_down(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_BUTTON_5_DOWN as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_ext2_button_up(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_BUTTON_5_UP as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_wheel(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_WHEEL as u16) != 0
+    }
+
+    #[inline]
+    pub fn is_horizontal_wheel(&self) -> bool {
+        self.flags_and_data().usButtonFlags & (RI_MOUSE_HWHEEL as u16) != 0
+    }
+}
+
+/// [see also](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawhid)
 #[repr(C)]
 #[derive(Clone)]
 pub struct HID {
     pub header: RAWINPUTHEADER,
     pub data: RAWHID,
+}
+
+impl HID {
+    #[inline]
+    pub fn per_input_size(&self) -> u32 {
+        self.data.dwSizeHid
+    }
+
+    #[inline]
+    pub fn count(&self) -> u32 {
+        self.data.dwCount
+    }
 }
 
 #[derive(Clone)]
