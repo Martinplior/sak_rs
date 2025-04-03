@@ -1,5 +1,4 @@
 use std::mem::ManuallyDrop;
-use std::mem::MaybeUninit;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -102,18 +101,17 @@ impl GlobalListener {
 
         register_raw_input_hook(&hwnd);
 
+        let mut win_msg = WinMsg {
+            msg: Default::default(),
+            instant: Instant::now(),
+        };
         loop {
-            let mut win_msg = MaybeUninit::<WinMsg>::uninit();
-            let r =
-                unsafe { GetMessageW(&raw mut (*win_msg.as_mut_ptr()).msg, Some(hwnd), 0, 0) }.0;
+            let r = unsafe { GetMessageW(&mut win_msg.msg, Some(hwnd), 0, 0) }.0;
             let instant = Instant::now();
             if matches!(r, 0 | -1) {
                 break;
             }
-            let win_msg = unsafe {
-                (*win_msg.as_mut_ptr()).instant = instant;
-                win_msg.assume_init()
-            };
+            win_msg.instant = instant;
             if msg_hook(&win_msg) {
                 continue;
             }
