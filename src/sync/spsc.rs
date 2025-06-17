@@ -22,7 +22,7 @@ impl<T> OnceReceiver<T> {
     /// available, or `Err(self)` if the value is not available yet.
     pub fn try_recv(self) -> Result<T, Self> {
         let value = self.inner.value.lock().take();
-        value.ok_or_else(|| self)
+        value.ok_or(self)
     }
 }
 
