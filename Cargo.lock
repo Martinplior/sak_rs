@@ -218,7 +218,7 @@ checksum = "eded382c5f5f786b989652c49544c4877d9f015cc22e145a5ea8ea66c2921cd2"
 
 [[package]]
 name = "sak_rs"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "parking_lot",
  "rfd",

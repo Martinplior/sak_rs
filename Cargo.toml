@@ -1,10 +1,18 @@
 [package]
 name = "sak_rs"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
 
 [features]
-all = ["os", "os_windows", "os_windows_input", "sync", "message_dialog", "graceful_run"]
+all = [
+    "os",
+    "os_windows",
+    "os_windows_input",
+    "sync",
+    "cell",
+    "message_dialog",
+    "graceful_run",
+]
 
 os = []
 os_windows = ["os", "dep:windows"]
@@ -20,6 +28,8 @@ os_windows_input = [
 ]
 
 sync = ["dep:parking_lot"]
+
+cell = []
 
 message_dialog = ["dep:rfd"]
 
