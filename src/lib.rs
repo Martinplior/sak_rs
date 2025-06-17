@@ -4,6 +4,9 @@ pub mod os;
 #[cfg(feature = "sync")]
 pub mod sync;
 
+#[cfg(feature = "cell")]
+pub mod cell;
+
 #[cfg(feature = "message_dialog")]
 pub mod message_dialog;
 
@@ -11,7 +14,7 @@ pub mod message_dialog;
 pub fn graceful_run<R>(
     f: impl FnOnce() -> R + std::panic::UnwindSafe,
 ) -> Result<R, Box<dyn std::any::Any + Send + 'static>> {
-    std::panic::catch_unwind(f).map_err(|err| {
+    std::panic::catch_unwind(f).inspect_err(|err| {
         let message = if let Some(s) = err.downcast_ref::<&str>() {
             s.to_string()
         } else if let Some(s) = err.downcast_ref::<String>() {
@@ -19,8 +22,7 @@ pub fn graceful_run<R>(
         } else {
             format!("{:?}", err)
         };
-        message_dialog::error(&message).show();
-        err
+        message_dialog::error(message).show();
     })
 }
 
