@@ -107,11 +107,10 @@ impl GlobalListener {
         };
         loop {
             let r = unsafe { GetMessageW(&mut win_msg.msg, Some(hwnd), 0, 0) }.0;
-            let instant = Instant::now();
+            win_msg.instant = Instant::now();
             if matches!(r, 0 | -1) {
                 break;
             }
-            win_msg.instant = instant;
             if msg_hook(&win_msg) {
                 continue;
             }
