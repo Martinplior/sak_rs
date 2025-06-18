@@ -109,7 +109,6 @@ impl<T: ?Sized + std::fmt::Debug> std::fmt::Debug for MutexCell<T> {
 
 #[cfg(test)]
 mod test {
-    #[allow(unused_imports)]
     use super::*;
 
     #[test]
