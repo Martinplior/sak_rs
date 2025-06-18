@@ -10,6 +10,8 @@ all = [
     "os_windows_input",
     "sync",
     "cell",
+    "collections",
+    "collections_adapter",
     "message_dialog",
     "graceful_run",
 ]
@@ -30,6 +32,9 @@ os_windows_input = [
 sync = ["dep:parking_lot"]
 
 cell = []
+
+collections = []
+collections_adapter = ["collections"]
 
 message_dialog = ["dep:rfd"]
 
