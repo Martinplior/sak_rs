@@ -10,6 +10,9 @@ pub mod cell;
 #[cfg(feature = "collections")]
 pub mod collections;
 
+#[cfg(feature = "async_utils")]
+pub mod async_utils;
+
 #[cfg(feature = "message_dialog")]
 pub mod message_dialog;
 
