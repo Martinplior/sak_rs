@@ -7,6 +7,9 @@ pub mod sync;
 #[cfg(feature = "cell")]
 pub mod cell;
 
+#[cfg(feature = "collections")]
+pub mod collections;
+
 #[cfg(feature = "message_dialog")]
 pub mod message_dialog;
 
