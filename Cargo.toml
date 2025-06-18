@@ -12,6 +12,7 @@ all = [
     "cell",
     "collections",
     "collections_adapter",
+    "async_utils",
     "message_dialog",
     "graceful_run",
 ]
@@ -35,6 +36,8 @@ cell = []
 
 collections = []
 collections_adapter = ["collections"]
+
+async_utils = []
 
 message_dialog = ["dep:rfd"]
 
