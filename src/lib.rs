@@ -10,11 +10,17 @@ pub mod cell;
 #[cfg(feature = "collections")]
 pub mod collections;
 
-#[cfg(feature = "async_utils")]
-pub mod async_utils;
+#[cfg(feature = "async")]
+pub mod async_;
+
+#[cfg(feature = "thread")]
+pub mod thread;
 
 #[cfg(feature = "message_dialog")]
 pub mod message_dialog;
+
+pub mod assert;
+pub mod slice;
 
 #[cfg(feature = "graceful_run")]
 pub fn graceful_run<R>(
