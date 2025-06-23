@@ -1,8 +1,16 @@
-use std::{
-    mem::MaybeUninit,
-    ops::{Index, IndexMut},
-    slice::SliceIndex,
+pub mod drain;
+pub mod into_iter;
+
+use core::{
+    cmp, fmt, hash, hint,
+    mem::{self, MaybeUninit},
+    ops::{self, Index, IndexMut, Range, RangeBounds},
+    ptr::{self, NonNull},
+    slice::{self, SliceIndex},
 };
+
+use drain::Drain;
+use into_iter::IntoIter;
 
 pub struct InplaceVec<T, const N: usize> {
     buf: [MaybeUninit<T>; N],
@@ -28,69 +36,70 @@ impl<T, const N: usize> InplaceVec<T, N> {
             return;
         }
         let len_to_drop = self.len - len;
-        let slice_to_drop = unsafe { self.buf.get_unchecked_mut(len..len_to_drop) };
         self.len = len;
-        unsafe { std::ptr::drop_in_place(slice_to_drop as *mut _ as *mut [T]) };
+        let slice_to_drop = unsafe { self.get_unchecked_mut(len..len_to_drop) };
+        unsafe { ptr::drop_in_place(slice_to_drop) };
     }
 
     #[inline]
     pub const fn as_slice(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(&self.buf as *const _ as _, self.len) }
+        unsafe { slice::from_raw_parts(&self.buf as *const _ as _, self.len) }
     }
 
     #[inline]
     pub const fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe { std::slice::from_raw_parts_mut(&mut self.buf as *mut _ as _, self.len) }
+        unsafe { slice::from_raw_parts_mut(&mut self.buf as *mut _ as _, self.len) }
     }
 
+    /// returns `None` if `index` is out of bounds.
     #[inline]
-    pub fn swap_remove(&mut self, index: usize) -> Result<T, Box<str>> {
+    pub fn swap_remove(&mut self, index: usize) -> Option<T> {
         let len = self.len;
         if index >= len {
-            let err = format!("swap_remove index (is {index}) should be < len (is {len})");
-            return Err(err.into_boxed_str());
+            return None;
         }
         let buf = &mut self.buf;
         let value = unsafe { buf.get_unchecked(index).assume_init_read() };
         let last_value = unsafe { buf.get_unchecked(len - 1).assume_init_read() };
         unsafe { buf.get_unchecked_mut(index) }.write(last_value);
         self.len -= 1;
-        Ok(value)
+        Some(value)
     }
 
-    pub fn insert(&mut self, index: usize, element: T) -> Result<(), Box<str>> {
+    pub fn insert(&mut self, index: usize, value: T) -> Result<(), (T, Box<str>)> {
         if self.is_full() {
             let err = "InplaceVec is full!".to_string();
-            return Err(err.into_boxed_str());
+            return Err((value, err.into_boxed_str()));
         }
         let len = self.len;
         if index > len {
             let err = format!("insertion index (is {index}) should be <= len (is {len})");
-            return Err(err.into_boxed_str());
+            return Err((value, err.into_boxed_str()));
         }
         let buf = &mut self.buf;
         let insert_place = unsafe { buf.get_unchecked_mut(index) };
         if index < len {
             let insert_place_ptr = insert_place as *mut _ as *mut T;
-            unsafe { std::ptr::copy(insert_place_ptr, insert_place_ptr.add(1), len - index) };
+            unsafe { ptr::copy(insert_place_ptr, insert_place_ptr.add(1), len - index) };
         }
-        insert_place.write(element);
+        insert_place.write(value);
         self.len += 1;
         Ok(())
     }
 
-    pub fn remove(&mut self, index: usize) -> Result<T, Box<str>> {
+    /// returns `None` if `index` is out of bounds.
+    pub fn remove(&mut self, index: usize) -> Option<T> {
         let len = self.len;
         if index >= len {
-            let err = format!("removal index (is {index}) should be < len (is {len})");
-            return Err(err.into_boxed_str());
+            return None;
         }
         let buf = &mut self.buf;
         let remove_place = unsafe { buf.get_unchecked_mut(index) };
         let value = unsafe { remove_place.assume_init_read() };
         let remove_place_ptr = remove_place as *mut _ as *mut T;
-        unsafe { std::ptr::copy(remove_place_ptr.add(1), remove_place_ptr, len - index - 1) };
-        Ok(value)
+        unsafe { ptr::copy(remove_place_ptr.add(1), remove_place_ptr, len - index - 1) };
+        self.len -= 1;
+        Some(value)
     }
 
     pub fn retain<F>(&mut self, mut f: F)
@@ -100,11 +109,12 @@ impl<T, const N: usize> InplaceVec<T, N> {
         self.retain_mut(|x| f(x));
     }
 
+    #[inline(always)]
     pub fn retain_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut T) -> bool,
     {
-        let original_len = self.len;
+        let original_len = self.len();
 
         if original_len == 0 {
             // Empty case: explicit return allows better optimization, vs letting compiler infer it
@@ -113,7 +123,7 @@ impl<T, const N: usize> InplaceVec<T, N> {
 
         // Avoid double drop if the drop guard is not executed,
         // since we may make some holes during the process.
-        self.len = 0;
+        unsafe { self.set_len(0) };
 
         // Vec: [Kept, Kept, Hole, Hole, Hole, Hole, Unchecked, Unchecked]
         //      |<-              processed len   ->| ^- next to check
@@ -138,17 +148,19 @@ impl<T, const N: usize> InplaceVec<T, N> {
                 if self.deleted_cnt > 0 {
                     // SAFETY: Trailing unchecked items must be valid since we never touch them.
                     unsafe {
-                        std::ptr::copy(
+                        ptr::copy(
                             self.v.as_ptr().add(self.processed_len),
                             self.v
                                 .as_mut_ptr()
                                 .add(self.processed_len - self.deleted_cnt),
                             self.original_len - self.processed_len,
-                        )
-                    };
+                        );
+                    }
                 }
                 // SAFETY: After filling holes, all items are in contiguous memory.
-                self.v.len = self.original_len - self.deleted_cnt;
+                unsafe {
+                    self.v.set_len(self.original_len - self.deleted_cnt);
+                }
             }
         }
 
@@ -174,7 +186,7 @@ impl<T, const N: usize> InplaceVec<T, N> {
                     g.processed_len += 1;
                     g.deleted_cnt += 1;
                     // SAFETY: We never touch this element again after dropped.
-                    unsafe { std::ptr::drop_in_place(cur) };
+                    unsafe { ptr::drop_in_place(cur) };
                     // We already advanced the counter.
                     if DELETED {
                         continue;
@@ -187,7 +199,7 @@ impl<T, const N: usize> InplaceVec<T, N> {
                     // We use copy for move, and never touch this element again.
                     unsafe {
                         let hole_slot = g.v.as_mut_ptr().add(g.processed_len - g.deleted_cnt);
-                        std::ptr::copy_nonoverlapping(cur, hole_slot, 1);
+                        ptr::copy_nonoverlapping(cur, hole_slot, 1);
                     }
                 }
                 g.processed_len += 1;
@@ -212,11 +224,12 @@ impl<T, const N: usize> InplaceVec<T, N> {
         self.dedup_by(|a, b| key(a) == key(b));
     }
 
+    #[inline(always)]
     pub fn dedup_by<F>(&mut self, mut same_bucket: F)
     where
         F: FnMut(&mut T, &mut T) -> bool,
     {
-        let len = self.len;
+        let len = self.len();
         if len <= 1 {
             return;
         }
@@ -268,7 +281,7 @@ impl<T, const N: usize> InplaceVec<T, N> {
                  * in-bounds. */
                 unsafe {
                     let ptr = self.vec.as_mut_ptr();
-                    let len = self.vec.len;
+                    let len = self.vec.len();
 
                     /* How many items were left when `same_bucket` panicked.
                      * Basically vec[read..].len() */
@@ -281,13 +294,13 @@ impl<T, const N: usize> InplaceVec<T, N> {
 
                     /* Copy `vec[read..]` to `vec[write..write+items_left]`.
                      * The slices can overlap, so `copy_nonoverlapping` cannot be used */
-                    std::ptr::copy(valid_ptr, dropped_ptr, items_left);
+                    ptr::copy(valid_ptr, dropped_ptr, items_left);
 
                     /* How many items have been already dropped
                      * Basically vec[read..write].len() */
                     let dropped = self.read.wrapping_sub(self.write);
 
-                    self.vec.len = len - dropped;
+                    self.vec.set_len(len - dropped);
                 }
             }
         }
@@ -304,7 +317,7 @@ impl<T, const N: usize> InplaceVec<T, N> {
         unsafe {
             // SAFETY: we checked that first_duplicate_idx in bounds before.
             // If drop panics, `gap` would remove this item without drop.
-            std::ptr::drop_in_place(start.add(first_duplicate_idx));
+            ptr::drop_in_place(start.add(first_duplicate_idx));
         }
 
         /* SAFETY: Because of the invariant, read_ptr, prev_ptr and write_ptr
@@ -320,14 +333,14 @@ impl<T, const N: usize> InplaceVec<T, N> {
                     // Increase `gap.read` now since the drop may panic.
                     gap.read += 1;
                     /* We have found duplicate, drop it in-place */
-                    std::ptr::drop_in_place(read_ptr);
+                    ptr::drop_in_place(read_ptr);
                 } else {
                     let write_ptr = start.add(gap.write);
 
                     /* read_ptr cannot be equal to write_ptr because at this point
                      * we guaranteed to skip at least one element (before loop starts).
                      */
-                    std::ptr::copy_nonoverlapping(read_ptr, write_ptr, 1);
+                    ptr::copy_nonoverlapping(read_ptr, write_ptr, 1);
 
                     /* We have filled that place, so go further */
                     gap.write += 1;
@@ -338,8 +351,8 @@ impl<T, const N: usize> InplaceVec<T, N> {
             /* Technically we could let `gap` clean up with its Drop, but
              * when `same_bucket` is guaranteed to not panic, this bloats a little
              * the codegen, so we just do it manually */
-            gap.vec.len = gap.write;
-            std::mem::forget(gap);
+            gap.vec.set_len(gap.write);
+            mem::forget(gap);
         }
     }
 
@@ -359,7 +372,7 @@ impl<T, const N: usize> InplaceVec<T, N> {
             return None;
         }
         self.len -= 1;
-        unsafe { std::hint::assert_unchecked(self.len < self.capacity()) };
+        unsafe { hint::assert_unchecked(self.len < self.capacity()) };
         Some(unsafe { self.buf.get_unchecked(self.len).assume_init_read() })
     }
 
@@ -382,16 +395,46 @@ impl<T, const N: usize> InplaceVec<T, N> {
         let count = other.len;
         other.len = 0;
         let dst = unsafe { self.as_mut_ptr().add(self.len) };
-        unsafe { std::ptr::copy_nonoverlapping(other.as_ptr(), dst, count) };
+        unsafe { ptr::copy_nonoverlapping(other.as_ptr(), dst, count) };
         self.len += count;
         Ok(())
+    }
+
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T, N>
+    where
+        R: RangeBounds<usize>,
+    {
+        // Memory safety
+        //
+        // When the Drain is first created, it shortens the length of
+        // the source vector to make sure no uninitialized or moved-from elements
+        // are accessible at all if the Drain's destructor never gets to run.
+        //
+        // Drain will ptr::read out the values to remove.
+        // When finished, remaining tail of the vec is copied back to cover
+        // the hole, and the vector length is restored to the new length.
+        //
+        let len = self.len;
+        let Range { start, end } = unsafe { crate::slice::range(range, ..len).unwrap_unchecked() };
+
+        // set self.vec length's to start, to be safe in case Drain is leaked
+        self.len = start;
+        unsafe {
+            let range_slice = slice::from_raw_parts(self.as_ptr().add(start), end - start);
+            Drain {
+                tail_start: end,
+                tail_len: len - end,
+                iter: range_slice.iter(),
+                vec: NonNull::from(self),
+            }
+        }
     }
 
     #[inline]
     pub fn clear(&mut self) {
         let slice_to_drop = self.as_mut_slice() as *mut _;
         self.len = 0;
-        unsafe { std::ptr::drop_in_place(slice_to_drop) };
+        unsafe { ptr::drop_in_place(slice_to_drop) };
     }
 
     #[inline]
@@ -411,10 +454,9 @@ impl<T, const N: usize> InplaceVec<T, N> {
 
     /// # Safety
     ///
-    /// - `new_len` must be less than or equal to [`capacity()`].
+    /// - `new_len` must be less than or equal to [`capacity()`](Self::capacity).
     /// - The elements at `old_len..new_len` must be initialized.
     ///
-    /// [`capacity()`]: Self::capacity
     #[inline]
     pub unsafe fn set_len(&mut self, new_len: usize) {
         debug_assert!(new_len < self.capacity());
@@ -425,12 +467,33 @@ impl<T, const N: usize> InplaceVec<T, N> {
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         unsafe { self.buf.get_unchecked_mut(self.len..) }
     }
+
+    /// # Safety
+    ///
+    /// ensure that `buf[..len]` are initialized.
+    #[inline]
+    pub unsafe fn from_raw(buf: [MaybeUninit<T>; N], len: usize) -> Self {
+        Self { buf, len }
+    }
+
+    /// returns `(buf, len)`
+    ///
+    /// # Safety
+    ///
+    /// `buf[..len]` are initialized.
+    #[inline]
+    pub unsafe fn into_raw(self) -> ([MaybeUninit<T>; N], usize) {
+        let buf = unsafe { ptr::read(&self.buf) };
+        let len = self.len;
+        mem::forget(self);
+        (buf, len)
+    }
 }
 
 impl<T, const N: usize> Drop for InplaceVec<T, N> {
     fn drop(&mut self) {
-        let slice_to_drop = std::ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len);
-        unsafe { std::ptr::drop_in_place(slice_to_drop) };
+        let slice_to_drop = ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), self.len);
+        unsafe { ptr::drop_in_place(slice_to_drop) };
     }
 }
 
@@ -460,7 +523,7 @@ impl<T: PartialOrd, const N1: usize, const N2: usize> PartialOrd<InplaceVec<T, N
     for InplaceVec<T, N1>
 {
     #[inline]
-    fn partial_cmp(&self, other: &InplaceVec<T, N2>) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &InplaceVec<T, N2>) -> Option<cmp::Ordering> {
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
@@ -469,12 +532,12 @@ impl<T: Eq, const N: usize> Eq for InplaceVec<T, N> {}
 
 impl<T: Ord, const N: usize> Ord for InplaceVec<T, N> {
     #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
         Ord::cmp(&**self, &**other)
     }
 }
 
-impl<T, const N: usize> std::ops::Deref for InplaceVec<T, N> {
+impl<T, const N: usize> ops::Deref for InplaceVec<T, N> {
     type Target = [T];
 
     #[inline]
@@ -483,7 +546,7 @@ impl<T, const N: usize> std::ops::Deref for InplaceVec<T, N> {
     }
 }
 
-impl<T, const N: usize> std::ops::DerefMut for InplaceVec<T, N> {
+impl<T, const N: usize> ops::DerefMut for InplaceVec<T, N> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_mut_slice()
@@ -491,30 +554,22 @@ impl<T, const N: usize> std::ops::DerefMut for InplaceVec<T, N> {
 }
 
 impl<T: Clone, const N: usize> Clone for InplaceVec<T, N> {
-    fn clone(&self) -> Self {
-        let mut v = Self::new();
-        let len = self.len;
-        unsafe { v.buf.get_unchecked_mut(..len) }
-            .iter_mut()
-            .zip(self.as_slice())
-            .for_each(|(dst, src)| {
-                dst.write(src.clone());
-            });
-        v.len = len;
-        v
-    }
-}
-
-impl<T: std::fmt::Debug, const N: usize> std::fmt::Debug for InplaceVec<T, N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&**self, f)
-    }
-}
-
-impl<T: std::hash::Hash, const N: usize> std::hash::Hash for InplaceVec<T, N> {
     #[inline]
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::hash::Hash::hash(&**self, state);
+    fn clone(&self) -> Self {
+        Self::from_iter(self.iter().cloned())
+    }
+}
+
+impl<T: fmt::Debug, const N: usize> fmt::Debug for InplaceVec<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&**self, f)
+    }
+}
+
+impl<T: hash::Hash, const N: usize> hash::Hash for InplaceVec<T, N> {
+    #[inline]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        hash::Hash::hash(&**self, state);
     }
 }
 
@@ -548,7 +603,21 @@ impl<T, const N: usize> FromIterator<T> for InplaceVec<T, N> {
     }
 }
 
+impl<T, const N: usize> IntoIterator for InplaceVec<T, N> {
+    type Item = T;
+    type IntoIter = IntoIter<T, N>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        let data = unsafe { ptr::read(&self.buf) };
+        let len = self.len;
+        mem::forget(self);
+        IntoIter::new(data, len)
+    }
+}
+
 impl<T, const N: usize> From<[T; N]> for InplaceVec<T, N> {
+    #[inline]
     fn from(value: [T; N]) -> Self {
         Self {
             buf: value.map(MaybeUninit::new),
@@ -574,5 +643,12 @@ mod tests {
     fn t2() {
         let v: InplaceVec<_, 5> = (0..10).collect();
         println!("{:?}", v);
+    }
+
+    #[test]
+    fn t_drain() {
+        let mut v = InplaceVec::from([1, 2, 3, 4, 5]);
+        v.drain(1..3);
+        assert_eq!(&*v, [1, 4, 5]);
     }
 }

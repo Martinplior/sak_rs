@@ -4,7 +4,7 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::collections::{InplaceVec, adapter::ContainerCommon};
+use crate::collections::{InplaceDeque, InplaceVec, adapter::ContainerCommon};
 
 pub trait StackLike<T>: ContainerCommon {
     type PushError;
@@ -212,5 +212,29 @@ impl<T, const N: usize> StackLike<T> for InplaceVec<T, N> {
     #[inline]
     fn top_mut(&mut self) -> Option<&mut T> {
         self.last_mut()
+    }
+}
+
+impl<T, const N: usize> StackLike<T> for InplaceDeque<T, N> {
+    type PushError = T;
+
+    #[inline]
+    fn push(&mut self, value: T) -> Result<(), Self::PushError> {
+        self.push_back(value)
+    }
+
+    #[inline]
+    fn pop(&mut self) -> Option<T> {
+        self.pop_back()
+    }
+
+    #[inline]
+    fn top(&self) -> Option<&T> {
+        self.back()
+    }
+
+    #[inline]
+    fn top_mut(&mut self) -> Option<&mut T> {
+        self.back_mut()
     }
 }

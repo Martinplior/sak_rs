@@ -4,7 +4,7 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::collections::{InplaceVec, adapter::ContainerCommon};
+use crate::collections::{InplaceDeque, InplaceVec, adapter::ContainerCommon};
 
 pub trait QueueLike<T>: ContainerCommon {
     type PushError;
@@ -245,7 +245,7 @@ impl<T, const N: usize> QueueLike<T> for InplaceVec<T, N> {
 
     #[inline]
     fn pop_front(&mut self) -> Option<T> {
-        self.remove(0).ok()
+        self.remove(0)
     }
 
     #[inline]
@@ -266,5 +266,39 @@ impl<T, const N: usize> QueueLike<T> for InplaceVec<T, N> {
     #[inline]
     fn back_mut(&mut self) -> Option<&mut T> {
         self.last_mut()
+    }
+}
+
+impl<T, const N: usize> QueueLike<T> for InplaceDeque<T, N> {
+    type PushError = T;
+
+    #[inline]
+    fn push_back(&mut self, value: T) -> Result<(), Self::PushError> {
+        self.push_back(value)
+    }
+
+    #[inline]
+    fn pop_front(&mut self) -> Option<T> {
+        self.pop_front()
+    }
+
+    #[inline]
+    fn front(&self) -> Option<&T> {
+        self.front()
+    }
+
+    #[inline]
+    fn front_mut(&mut self) -> Option<&mut T> {
+        self.front_mut()
+    }
+
+    #[inline]
+    fn back(&self) -> Option<&T> {
+        self.back()
+    }
+
+    #[inline]
+    fn back_mut(&mut self) -> Option<&mut T> {
+        self.back_mut()
     }
 }
