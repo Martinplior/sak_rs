@@ -1,5 +1,6 @@
-use std::{
+use core::{
     cell::{Cell, UnsafeCell},
+    fmt,
     ops::{Deref, DerefMut},
 };
 
@@ -30,14 +31,14 @@ impl<T: ?Sized> Drop for MutexCellGuard<'_, T> {
     }
 }
 
-impl<T: ?Sized + std::fmt::Debug> std::fmt::Debug for MutexCellGuard<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&**self, f)
+impl<T: ?Sized + fmt::Debug> fmt::Debug for MutexCellGuard<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized + std::fmt::Display> std::fmt::Display for MutexCellGuard<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: ?Sized + fmt::Display> fmt::Display for MutexCellGuard<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (**self).fmt(f)
     }
 }
@@ -95,8 +96,8 @@ impl<T: Default> Default for MutexCell<T> {
     }
 }
 
-impl<T: ?Sized + std::fmt::Debug> std::fmt::Debug for MutexCell<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: ?Sized + fmt::Debug> fmt::Debug for MutexCell<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("MutexCell");
         d.field("is_locked", &self.is_locked.get());
         match self.lock() {
