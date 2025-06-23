@@ -12,7 +12,8 @@ all = [
     "cell",
     "collections",
     "collections_adapter",
-    "async_utils",
+    "async",
+    "thread",
     "message_dialog",
     "graceful_run",
 ]
@@ -37,7 +38,14 @@ cell = []
 collections = []
 collections_adapter = ["collections"]
 
-async_utils = []
+async = ["sync", "thread"]
+
+thread = [
+    "async",
+    "dep:tinyrand",
+    "dep:crossbeam-channel",
+    "crossbeam-channel/std",
+]
 
 message_dialog = ["dep:rfd"]
 
@@ -46,10 +54,13 @@ graceful_run = ["message_dialog"]
 [dependencies]
 windows = { version = "0.61.3", default-features = false, optional = true }
 parking_lot = { version = "0.12.4", default-features = false, optional = true }
+crossbeam-channel = { version = "0.5.15", default-features = false, optional = true }
 rfd = { version = "0.15.3", default-features = false, optional = true }
+tinyrand = { version = "0.5.0", default-features = false, optional = true }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
+option_map_unit_fn = "allow"
 unwrap_used = "warn"
