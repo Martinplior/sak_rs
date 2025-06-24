@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    sync::atomic::{self, AtomicBool},
+    sync::atomic::{self, AtomicBool, AtomicUsize},
     task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
     thread::Thread,
     time::{Duration, Instant},
@@ -13,14 +13,39 @@ struct ThreadWaker {
     unparked: AtomicBool,
 
     timer_thread: TimerThread,
+
+    strong_count: AtomicUsize,
 }
 
 impl ThreadWaker {
-    fn wake_by_ref(this: *const ()) {
-        let this = unsafe { &*(this as *const Self) };
+    const VTABLE: RawWakerVTable = RawWakerVTable::new(
+        ThreadWaker::clone,
+        ThreadWaker::wake_by_ref,
+        ThreadWaker::wake_by_ref,
+        ThreadWaker::drop,
+    );
+
+    fn clone(raw_this: *const ()) -> RawWaker {
+        let this = unsafe { &*(raw_this as *const Self) };
+        this.strong_count.fetch_add(1, atomic::Ordering::Relaxed);
+        RawWaker::new(raw_this, &Self::VTABLE)
+    }
+
+    fn wake_by_ref(raw_this: *const ()) {
+        let this = unsafe { &*(raw_this as *const Self) };
         let unparked = this.unparked.swap(true, atomic::Ordering::Release);
-        if !unparked {
-            this.thread.unpark();
+        (!unparked).then(|| this.thread.unpark());
+    }
+
+    fn drop(raw_this: *const ()) {
+        let old_strong_count = {
+            // restrict `&Self` in the scope.
+            let this = unsafe { &*(raw_this as *const Self) };
+            this.strong_count.fetch_sub(1, atomic::Ordering::Release)
+        };
+        if old_strong_count == 1 {
+            atomic::fence(atomic::Ordering::Acquire);
+            let _ = unsafe { Box::from_raw(raw_this as *mut Self) };
         }
     }
 
@@ -31,25 +56,19 @@ impl ThreadWaker {
         }
         Some(unsafe { &*(waker.data() as *const Self) })
     }
-
-    const VTABLE: RawWakerVTable = RawWakerVTable::new(
-        |data| RawWaker::new(data, &Self::VTABLE),
-        ThreadWaker::wake_by_ref,
-        ThreadWaker::wake_by_ref,
-        |_| {},
-    );
 }
 
 pub fn block_on<R>(f: impl Future<Output = R>) -> R {
     let mut f = std::pin::pin!(f);
-    let thread_waker = ThreadWaker {
+    let thread_waker = &*Box::leak(Box::new(ThreadWaker {
         thread: std::thread::current(),
         unparked: false.into(),
         timer_thread: TimerThread::with_capacity(8),
-    };
+        strong_count: 1.into(),
+    }));
     let waker = unsafe {
         Waker::from_raw(RawWaker::new(
-            &thread_waker as *const _ as _,
+            thread_waker as *const ThreadWaker as _,
             &ThreadWaker::VTABLE,
         ))
     };
