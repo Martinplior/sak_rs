@@ -1,6 +1,9 @@
 use std::{
     future::Future,
-    sync::atomic::{self, AtomicBool, AtomicUsize},
+    sync::{
+        LazyLock,
+        atomic::{self, AtomicBool, AtomicUsize},
+    },
     task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
     thread::Thread,
     time::{Duration, Instant},
@@ -8,11 +11,22 @@ use std::{
 
 use crate::thread::TimerThread;
 
+pub trait FutureWait: Future {
+    fn wait(self) -> Self::Output;
+}
+
+impl<T: Future> FutureWait for T {
+    #[inline]
+    fn wait(self) -> Self::Output {
+        block_on(self)
+    }
+}
+
 struct ThreadWaker {
     thread: Thread,
     unparked: AtomicBool,
 
-    timer_thread: TimerThread,
+    timer_thread: LazyLock<TimerThread>,
 
     strong_count: AtomicUsize,
 }
@@ -63,7 +77,7 @@ pub fn block_on<R>(f: impl Future<Output = R>) -> R {
     let thread_waker = &*Box::leak(Box::new(ThreadWaker {
         thread: std::thread::current(),
         unparked: false.into(),
-        timer_thread: TimerThread::with_capacity(8),
+        timer_thread: LazyLock::new(|| TimerThread::with_capacity(8)),
         strong_count: 1.into(),
     }));
     let waker = unsafe {
@@ -186,7 +200,7 @@ mod tests {
             println!("f2 end yield");
         };
         println!("start block");
-        block_on(join(f1, f2));
+        join(f1, f2).wait();
         println!("end");
     }
 }
