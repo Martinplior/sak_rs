@@ -43,12 +43,7 @@ collections_adapter = ["collections"]
 
 async = ["sync", "thread"]
 
-thread = [
-    "async",
-    "dep:tinyrand",
-    "dep:crossbeam-channel",
-    "crossbeam-channel/std",
-]
+thread = ["async", "dep:tinyrand", "dep:crossbeam-channel", "crossbeam-channel/std"]
 
 message_dialog = ["dep:rfd"]
 
@@ -56,12 +51,7 @@ graceful_run = ["message_dialog"]
 
 graphics = []
 graphics_renderer = ["graphics"]
-graphics_renderer_vulkan = [
-    "graphics_renderer",
-    "thread",
-    "dep:vulkano",
-    "dep:raw-window-handle",
-]
+graphics_renderer_vulkan = ["graphics_renderer", "thread", "dep:vulkano", "dep:raw-window-handle"]
 
 [dependencies]
 windows = { version = "0.61.3", default-features = false, optional = true }

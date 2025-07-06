@@ -106,7 +106,7 @@ impl Shared {
         queue: Arc<Queue>,
         render_pass: &Arc<RenderPass>,
         clear_color: [f32; 4],
-        mut add_commands: impl FnMut(&mut CommandBuilder),
+        add_commands: impl FnOnce(&mut CommandBuilder),
     ) {
         let (image_index, suboptimal, acquire_future) =
             match vulkano::swapchain::acquire_next_image(self.swapchain.clone(), None)
@@ -265,7 +265,7 @@ impl Renderer {
         self.shared.lock().set_vsync(&self.render_pass, vsync);
     }
 
-    pub fn render(&mut self, add_commands: impl FnMut(&mut CommandBuilder) + Send + 'static) {
+    pub fn render(&mut self, add_commands: impl FnOnce(&mut CommandBuilder) + Send + 'static) {
         let shared = self.shared.clone();
         let device = self.device.clone();
         let queue = self.queue.clone();
