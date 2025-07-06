@@ -19,6 +19,9 @@ pub mod thread;
 #[cfg(feature = "message_dialog")]
 pub mod message_dialog;
 
+#[cfg(feature = "graphics")]
+pub mod graphics;
+
 pub mod assert;
 pub mod slice;
 

@@ -16,6 +16,9 @@ all = [
     "thread",
     "message_dialog",
     "graceful_run",
+    "graphics",
+    "graphics_renderer",
+    "graphics_renderer_vulkan",
 ]
 
 os = []
@@ -51,12 +54,23 @@ message_dialog = ["dep:rfd"]
 
 graceful_run = ["message_dialog"]
 
+graphics = []
+graphics_renderer = ["graphics"]
+graphics_renderer_vulkan = [
+    "graphics_renderer",
+    "thread",
+    "dep:vulkano",
+    "dep:raw-window-handle",
+]
+
 [dependencies]
 windows = { version = "0.61.3", default-features = false, optional = true }
 parking_lot = { version = "0.12.4", default-features = false, optional = true }
 crossbeam-channel = { version = "0.5.15", default-features = false, optional = true }
 rfd = { version = "0.15.3", default-features = false, optional = true }
 tinyrand = { version = "0.5.0", default-features = false, optional = true }
+vulkano = { version = "0.35.1", default-features = false, optional = true }
+raw-window-handle = { version = "0.6.2", default-features = false, optional = true }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
