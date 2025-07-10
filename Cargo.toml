@@ -14,6 +14,7 @@ all = [
     "collections_adapter",
     "async",
     "thread",
+    "thread_async",
     "message_dialog",
     "graceful_run",
     "graphics",
@@ -43,7 +44,8 @@ collections_adapter = ["collections"]
 
 async = ["sync", "thread"]
 
-thread = ["async", "dep:tinyrand", "dep:crossbeam-channel", "crossbeam-channel/std"]
+thread = ["sync", "dep:crossbeam-channel", "crossbeam-channel/std"]
+thread_async = ["thread", "async", "dep:tinyrand"]
 
 message_dialog = ["dep:rfd"]
 

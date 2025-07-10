@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     num::NonZero,
     pin::Pin,
     task::{Poll, Waker},
@@ -6,21 +7,19 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver as MpmcReceiver, Sender as MpmcSender};
+use tinyrand::{RandRange, StdRand};
 
 use crate::sync::spsc::{self, OnceReceiver, OnceSender};
 
-pub(super) enum Task {
+enum Task {
     Task(Pin<Box<dyn Future<Output = ()> + Send>>),
     Exit,
 }
 
-pub(super) struct RawAsyncThread(JoinHandle<()>);
+struct RawAsyncThread(JoinHandle<()>);
 
 impl RawAsyncThread {
-    pub(super) fn with_capacity(
-        task_receiver: MpmcReceiver<Task>,
-        capacity: usize,
-    ) -> (Self, Waker) {
+    fn with_capacity(task_receiver: MpmcReceiver<Task>, capacity: usize) -> (Self, Waker) {
         let (waker_sender, waker_receiver) = spsc::once();
 
         let join_handle = std::thread::spawn(move || {
@@ -34,7 +33,7 @@ impl RawAsyncThread {
     /// before [`join`](Self::join), ensure that this worker can receive a [`Task::Exit`].
     ///
     /// othewise `join` will block forever...
-    pub(super) fn join(self) -> std::thread::Result<()> {
+    fn join(self) -> std::thread::Result<()> {
         self.0.join()
     }
 }
@@ -177,6 +176,105 @@ impl Drop for AsyncThread {
     }
 }
 
+/// async version of [`ThreadPool`].
+///
+/// each thread can run async tasks.
+pub struct AsyncThreadPool {
+    workers: Option<Box<[RawAsyncThread]>>,
+    wakers: Box<[Waker]>,
+    task_sender: MpmcSender<Task>,
+    rnd: Cell<StdRand>,
+}
+
+impl AsyncThreadPool {
+    #[inline]
+    pub fn new(num_workers: NonZero<usize>) -> Self {
+        Self::with_capacity(num_workers, 0)
+    }
+
+    pub fn with_capacity(num_workers: NonZero<usize>, capacity: usize) -> Self {
+        let num_workers = num_workers.get();
+        let (task_sender, task_receiver) = crossbeam_channel::unbounded();
+        let (workers, wakers): (Vec<_>, Vec<_>) = (0..num_workers)
+            .map(|_| RawAsyncThread::with_capacity(task_receiver.clone(), capacity))
+            .collect();
+        let workers = workers.into_boxed_slice();
+        let wakers = wakers.into_boxed_slice();
+        // fixed seed? it doesn't really matter imo...
+        let rnd = Cell::default();
+        Self {
+            workers: Some(workers),
+            wakers,
+            task_sender,
+            rnd,
+        }
+    }
+
+    #[inline]
+    pub fn add_task(&self, task: impl Future<Output = ()> + Send + 'static) {
+        self.add_task_boxed(Box::new(task));
+    }
+
+    #[inline]
+    pub fn add_task_sync<R: Send + 'static>(
+        &self,
+        task: impl Future<Output = R> + Send + 'static,
+    ) -> OnceReceiver<R> {
+        let (r_sender, r_receiver) = spsc::once();
+        let task = Box::new(async { r_sender.send(task.await) });
+        self.add_task_boxed(task);
+        r_receiver
+    }
+
+    #[inline]
+    pub fn add_task_boxed(&self, task: Box<dyn Future<Output = ()> + Send>) {
+        self.send_and_wake(Task::Task(Box::into_pin(task)));
+    }
+
+    #[inline]
+    pub fn num_workers(&self) -> usize {
+        unsafe { self.workers.as_ref().unwrap_unchecked() }.len()
+    }
+
+    pub fn join(mut self) -> std::thread::Result<()> {
+        unsafe { self.join_by_ref().unwrap_unchecked() }
+    }
+}
+
+impl AsyncThreadPool {
+    fn send_and_wake(&self, task: Task) {
+        self.task_sender.send(task).expect("unreachable");
+        // just wake a worker randomly...
+        let index = self.rnd_scope(|r| r.next_range(0..self.wakers.len()));
+        unsafe { self.wakers.get_unchecked(index) }.wake_by_ref();
+    }
+
+    #[inline]
+    fn rnd_scope<R>(&self, f: impl FnOnce(&mut StdRand) -> R) -> R {
+        let mut rnd = self.rnd.take();
+        let r = f(&mut rnd);
+        self.rnd.set(rnd);
+        r
+    }
+
+    fn join_by_ref(&mut self) -> Option<std::thread::Result<()>> {
+        self.workers.take().map(|workers| {
+            workers
+                .iter()
+                .for_each(|_| self.task_sender.send(Task::Exit).expect("unreachable"));
+            self.wakers.iter().for_each(|w| w.wake_by_ref());
+            workers.into_iter().try_for_each(|w| w.join())
+        })
+    }
+}
+
+impl Drop for AsyncThreadPool {
+    fn drop(&mut self) {
+        self.join_by_ref()
+            .map(|r| r.expect("AsyncThreadPool panic"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -197,5 +295,20 @@ mod tests {
         std::thread::sleep(Duration::from_secs(2));
         println!("world!");
         (500..1_000).for_each(|i| worker.add_task(foo(i)));
+    }
+
+    #[test]
+    fn t2() {
+        let num_workers = std::thread::available_parallelism()
+            .map(|n| n.into())
+            .unwrap_or(2);
+        let thread_pool = AsyncThreadPool::new(num_workers.try_into().unwrap());
+        (0..(num_workers * 5)).for_each(|i| {
+            thread_pool.add_task(async move {
+                async_::sleep(Duration::from_secs(3)).await;
+                println!("f({i}) end");
+            });
+        });
+        println!("hello!");
     }
 }

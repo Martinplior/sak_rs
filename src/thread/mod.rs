@@ -1,9 +1,11 @@
+#[cfg(feature = "thread_async")]
 pub mod async_;
-pub mod pool;
+
 pub mod timer;
 pub mod worker;
 
-pub use async_::AsyncThread;
-pub use pool::{AsyncThreadPool, ThreadPool};
+#[cfg(feature = "thread_async")]
+pub use async_::{AsyncThread, AsyncThreadPool};
+
 pub use timer::TimerThread;
-pub use worker::WorkerThread;
+pub use worker::{ThreadPool, WorkerThread};
