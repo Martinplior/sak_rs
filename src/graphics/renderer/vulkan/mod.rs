@@ -54,15 +54,21 @@ impl Allocators {
 }
 
 struct Shared {
+    device: Arc<Device>,
+    queue: Arc<Queue>,
+    render_pass: Arc<RenderPass>,
+    allocators: Allocators,
+}
+
+struct SharedMut {
     swapchain: Arc<Swapchain>,
     swapchain_images: Box<[Arc<Image>]>,
-    allocators: Allocators,
     framebuffers: Box<[Arc<Framebuffer>]>,
     fences: Box<[Option<Arc<FenceFuture>>]>,
     prev_fence_index: usize,
 }
 
-impl Shared {
+impl SharedMut {
     fn resize(&mut self, render_pass: &Arc<RenderPass>, new_size: [u32; 2]) {
         self.recreate_swapchain(
             render_pass,
@@ -102,12 +108,15 @@ impl Shared {
 
     fn render(
         &mut self,
-        device: Arc<Device>,
-        queue: Arc<Queue>,
-        render_pass: &Arc<RenderPass>,
+        shared: &Shared,
         clear_color: [f32; 4],
         add_commands: impl FnOnce(&mut CommandBuilder),
     ) {
+        let device = &shared.device;
+        let queue = &shared.queue;
+        let render_pass = &shared.render_pass;
+        let allocators = &shared.allocators;
+
         let (image_index, suboptimal, acquire_future) =
             match vulkano::swapchain::acquire_next_image(self.swapchain.clone(), None)
                 .map_err(Validated::unwrap)
@@ -135,7 +144,7 @@ impl Shared {
             .clone()
         {
             None => {
-                let mut now = vulkano::sync::now(device);
+                let mut now = vulkano::sync::now(device.clone());
                 now.cleanup_finished();
                 now.boxed_send()
             }
@@ -147,8 +156,8 @@ impl Shared {
                 extent: self.swapchain.image_extent().map(|x| x as f32),
                 ..Default::default()
             },
-            self.allocators.command_buffer.clone(),
-            &queue,
+            allocators.command_buffer.clone(),
+            queue,
             &self.framebuffers,
             image_index,
             clear_color,
@@ -160,7 +169,7 @@ impl Shared {
             .then_execute(queue.clone(), command_buffer)
             .expect("failed to execute command buffer")
             .then_swapchain_present(
-                queue,
+                queue.clone(),
                 SwapchainPresentInfo::swapchain_image_index(
                     self.swapchain.clone(),
                     image_index as u32,
@@ -176,7 +185,7 @@ impl Shared {
                 None
             }
             Err(e) => {
-                eprintln!("failed to flush future: {}", e);
+                eprintln!("failed to flush future: {e}");
                 None
             }
         };
@@ -190,11 +199,7 @@ impl Shared {
 }
 
 pub struct Renderer {
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-    render_pass: Arc<RenderPass>,
-
-    shared: Arc<Mutex<Shared>>,
+    shared: Arc<(Shared, Mutex<SharedMut>)>,
     render_worker: WorkerThread,
     render_receiver: Option<OnceReceiver<()>>,
 
@@ -227,19 +232,24 @@ impl Renderer {
         let render_pass = render_pass::create(device.clone(), &swapchain);
         let framebuffers = framebuffers::create(&swapchain_images, &render_pass);
         let fences = (0..swapchain_images.len()).map(|_| None).collect();
-        let shared = Arc::new(Mutex::new(Shared {
-            swapchain,
-            swapchain_images,
-            allocators,
-            framebuffers,
-            fences,
-            prev_fence_index: 0,
-        }));
+        let shared = {
+            let shared = Shared {
+                device,
+                queue,
+                render_pass,
+                allocators,
+            };
+            let shared_mut = Mutex::new(SharedMut {
+                swapchain,
+                swapchain_images,
+                framebuffers,
+                fences,
+                prev_fence_index: 0,
+            });
+            Arc::new((shared, shared_mut))
+        };
         let render_worker = WorkerThread::new();
         Self {
-            device,
-            queue,
-            render_pass,
             shared,
             render_worker,
             render_receiver: None,
@@ -248,33 +258,28 @@ impl Renderer {
     }
 
     pub fn device(&self) -> &Arc<Device> {
-        &self.device
+        &self.shared.0.device
     }
 
     pub fn render_pass(&self) -> &Arc<RenderPass> {
-        &self.render_pass
+        &self.shared.0.render_pass
     }
 
     pub fn resize(&mut self, new_size: [u32; 2]) {
-        let [width, height] = new_size;
-        let new_size = [width.max(1), height.max(1)];
-        self.shared.lock().resize(&self.render_pass, new_size);
+        let new_size = new_size.map(|x| x.max(1));
+        self.shared.1.lock().resize(self.render_pass(), new_size);
     }
 
     pub fn set_vsync(&mut self, vsync: bool) {
-        self.shared.lock().set_vsync(&self.render_pass, vsync);
+        self.shared.1.lock().set_vsync(self.render_pass(), vsync);
     }
 
     pub fn render(&mut self, add_commands: impl FnOnce(&mut CommandBuilder) + Send + 'static) {
         let shared = self.shared.clone();
-        let device = self.device.clone();
-        let queue = self.queue.clone();
-        let render_pass = self.render_pass.clone();
         let clear_color = self.clear_color;
         let new_render_receiver = self.render_worker.add_task_sync(move || {
-            shared
-                .lock()
-                .render(device, queue, &render_pass, clear_color, add_commands);
+            let (shared, shared_mut) = &*shared;
+            shared_mut.lock().render(shared, clear_color, add_commands);
         });
         self.render_receiver
             .replace(new_render_receiver)

@@ -35,7 +35,7 @@ pub fn graceful_run<R>(
         } else if let Some(s) = err.downcast_ref::<String>() {
             s.clone()
         } else {
-            format!("{:?}", err)
+            format!("{err:?}")
         };
         message_dialog::error(message).show();
     })
