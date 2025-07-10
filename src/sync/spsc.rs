@@ -1,26 +1,52 @@
 use std::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
     ptr::NonNull,
-    sync::atomic::{self, AtomicBool},
+    sync::atomic::{self, AtomicU8},
     thread::Thread,
+    time::Instant,
 };
 
-use parking_lot::Mutex;
+use parking_lot::{RawMutex, lock_api::RawMutex as _};
 
-#[derive(Debug)]
-struct OnceInner<T> {
-    value_and_thread: Mutex<(Option<T>, Option<Thread>)>,
-    only_one_connection: AtomicBool,
+pub struct OnceInner<T> {
+    lock: RawMutex,
+    value: UnsafeCell<Option<T>>,
+    thread: UnsafeCell<Option<Thread>>,
+
+    state: AtomicU8,
 }
 
-/// similar to [`std::sync::Arc::drop`]
-#[inline]
-unsafe fn once_drop<T>(inner: NonNull<OnceInner<T>>) {
-    let only_one_connection = unsafe { inner.as_ref() }
-        .only_one_connection
-        .swap(true, atomic::Ordering::Release);
-    if only_one_connection {
+impl<T> OnceInner<T> {
+    const CONNECTION_BIT: u8 = 0b1;
+    const INPLACE_BIT: u8 = 0b10;
+
+    fn new(inplace: bool) -> Self {
+        Self {
+            lock: RawMutex::INIT,
+            value: UnsafeCell::new(None),
+            thread: UnsafeCell::new(None),
+            state: AtomicU8::new(if inplace { Self::INPLACE_BIT } else { 0 }),
+        }
+    }
+
+    /// similar to [`std::sync::Arc::drop`]
+    #[inline]
+    unsafe fn drop(inner: NonNull<Self>) {
+        let old_state = unsafe { inner.as_ref() }
+            .state
+            .fetch_or(Self::CONNECTION_BIT, atomic::Ordering::Release);
+        let only_one_connection = (old_state & Self::CONNECTION_BIT) != 0;
+        if !only_one_connection {
+            return;
+        }
         atomic::fence(atomic::Ordering::Acquire);
-        let _ = unsafe { Box::from_raw(inner.as_ptr()) };
+        let inplace = (old_state & Self::INPLACE_BIT) != 0;
+        if inplace {
+            unsafe { inner.drop_in_place() };
+        } else {
+            let _ = unsafe { Box::from_raw(inner.as_ptr()) };
+        }
     }
 }
 
@@ -33,15 +59,16 @@ impl<T> OnceReceiver<T> {
     /// Receive the one-time value. This function blocks until the value is available.
     pub fn recv(self) -> T {
         loop {
-            let mut guard = unsafe { self.inner.as_ref() }.value_and_thread.lock();
-            let (value, thread) = &mut *guard;
-            if let Some(value) = value.take() {
+            let inner = unsafe { self.inner.as_ref() };
+            inner.lock.lock();
+            let value = unsafe { &mut *inner.value.get() }.take();
+            if let Some(value) = value {
                 return value;
             }
-            thread
-                .is_none()
-                .then(|| *thread = Some(std::thread::current()));
-            drop(guard);
+            unsafe {
+                *inner.thread.get() = Some(std::thread::current());
+                inner.lock.unlock();
+            }
             std::thread::park();
         }
     }
@@ -49,18 +76,49 @@ impl<T> OnceReceiver<T> {
     /// Try to receive the one-time value. This function returns `Ok(value)` if the value is
     /// available, or `Err(self)` if the value is not available yet.
     pub fn try_recv(self) -> Result<T, Self> {
-        let value = unsafe { self.inner.as_ref() }
-            .value_and_thread
-            .lock()
-            .0
-            .take();
-        value.ok_or(self)
+        let inner = unsafe { self.inner.as_ref() };
+        if !inner.lock.try_lock() {
+            return Err(self);
+        }
+        let value = unsafe { &mut *inner.value.get() }.take();
+        if let Some(value) = value {
+            Ok(value)
+        } else {
+            unsafe { inner.lock.unlock() };
+            Err(self)
+        }
+    }
+
+    /// Try to receive the one-time value with timeout. This function returns `Ok(value)` if the
+    /// value is available, or `Err(self)` if the value is not available within the specified
+    /// `timeout`.
+    pub fn try_recv_timeout(self, timeout: std::time::Duration) -> Result<T, Self> {
+        let begin_instant = Instant::now();
+        loop {
+            let inner = unsafe { self.inner.as_ref() };
+            if inner.lock.try_lock() {
+                let value = unsafe { &mut *inner.value.get() }.take();
+                if let Some(value) = value {
+                    return Ok(value);
+                }
+                unsafe {
+                    *inner.thread.get() = Some(std::thread::current());
+                    inner.lock.unlock();
+                }
+            }
+            let elapsed = begin_instant.elapsed();
+            if elapsed >= timeout {
+                return Err(self);
+            }
+            let remaining = timeout - elapsed;
+            std::thread::park_timeout(remaining);
+        }
     }
 }
 
 impl<T> Drop for OnceReceiver<T> {
     fn drop(&mut self) {
-        unsafe { once_drop(self.inner) };
+        unsafe { OnceInner::drop(self.inner) };
     }
 }
 
@@ -74,18 +132,18 @@ pub struct OnceSender<T> {
 impl<T> OnceSender<T> {
     /// Send the one-time value.
     pub fn send(self, value: T) {
-        let mut guard = unsafe { self.inner.as_ref() }.value_and_thread.lock();
-        let (inner_value, thread) = &mut *guard;
-        *inner_value = Some(value);
-        let thread = thread.take();
-        drop(guard);
+        let inner = unsafe { self.inner.as_ref() };
+        inner.lock.lock();
+        unsafe { *inner.value.get() = Some(value) };
+        let thread = unsafe { &mut *inner.thread.get() }.take();
+        unsafe { inner.lock.unlock() };
         thread.map(|thread| thread.unpark());
     }
 }
 
 impl<T> Drop for OnceSender<T> {
     fn drop(&mut self) {
-        unsafe { once_drop(self.inner) };
+        unsafe { OnceInner::drop(self.inner) };
     }
 }
 
@@ -93,13 +151,39 @@ unsafe impl<T: Send> Send for OnceSender<T> {}
 
 /// channel for one-time usage
 pub fn once<T: Send>() -> (OnceSender<T>, OnceReceiver<T>) {
-    let inner = NonNull::from(Box::leak(Box::new(OnceInner {
-        value_and_thread: Mutex::new((None, None)),
-        only_one_connection: false.into(),
-    })));
-    let sender = OnceSender { inner };
-    let receiver = OnceReceiver { inner };
-    (sender, receiver)
+    let inner = NonNull::from(Box::leak(Box::new(OnceInner::new(false))));
+    (OnceSender { inner }, OnceReceiver { inner })
+}
+
+/// channel for one-time usage with inplace allocation.
+///
+/// caller should ensure that `*inner` is uninitialized before calling this function.
+pub fn once_inplace<T: Send>(
+    inner: &'static mut MaybeUninit<OnceInner<T>>,
+) -> (OnceSender<T>, OnceReceiver<T>) {
+    let inner = NonNull::from(inner.write(OnceInner::new(true)));
+    (OnceSender { inner }, OnceReceiver { inner })
+}
+
+/// channel for one-time usage with inplace allocation.
+///
+/// caller should ensure that `*inner` is uninitialized before calling this function.
+///
+/// # Safety
+///
+/// caller **must** ensure that `*inner` lives longer than the returned `OnceSender` and
+/// `OnceReceiver`.
+///
+/// [see also](once_inplace)
+pub unsafe fn once_inplace_unchecked<T: Send + 'static>(
+    inner: &mut MaybeUninit<OnceInner<T>>,
+) -> (OnceSender<T>, OnceReceiver<T>) {
+    unsafe {
+        once_inplace(core::mem::transmute::<
+            &mut MaybeUninit<OnceInner<T>>,
+            &'static mut MaybeUninit<OnceInner<T>>,
+        >(inner))
+    }
 }
 
 #[cfg(test)]
@@ -135,5 +219,26 @@ mod tests {
         let (sender, receiver) = once::<Bar>();
         std::thread::spawn(move || sender.send(Bar::new()));
         receiver.recv();
+    }
+
+    #[test]
+    fn timeout() {
+        let (sender, receiver) = once::<String>();
+        let receiver = receiver
+            .try_recv_timeout(Duration::from_millis(1000))
+            .unwrap_err();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1000));
+            sender.send("world".into());
+        });
+        receiver.try_recv_timeout(Duration::from_secs(10)).unwrap();
+    }
+
+    #[test]
+    fn inplace() {
+        let mut inner = MaybeUninit::uninit();
+        let (sender, receiver) = unsafe { once_inplace_unchecked(&mut inner) };
+        sender.send(10);
+        assert_eq!(receiver.recv(), 10);
     }
 }
