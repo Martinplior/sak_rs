@@ -22,6 +22,9 @@ pub mod message_dialog;
 #[cfg(feature = "graphics")]
 pub mod graphics;
 
+#[cfg(feature = "font")]
+pub mod font;
+
 pub mod assert;
 pub mod slice;
 
