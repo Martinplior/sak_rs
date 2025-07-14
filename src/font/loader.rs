@@ -20,6 +20,10 @@ impl SystemFontsLoader {
         }
     }
 
+    pub fn all_family_names(&self) -> Result<Vec<String>, SelectionError> {
+        self.source.all_families()
+    }
+
     pub fn load_by_family_name(&self, family_name: &str) -> Result<Box<[u8]>, LoadFontError> {
         let family_handle = self.source.select_family_by_name(family_name)?;
         let first_font_handle = family_handle.fonts().first().expect("unreachable");
