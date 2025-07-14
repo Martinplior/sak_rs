@@ -6,8 +6,11 @@ use parking_lot::Mutex;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use vulkano::command_buffer::CommandBufferExecFuture;
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
-use vulkano::device::{Device, Queue};
+use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
+use vulkano::device::{Device, DeviceExtensions, DeviceFeatures, Queue};
 use vulkano::image::Image;
+use vulkano::memory::allocator::StandardMemoryAllocator;
+use vulkano::pipeline::graphics::color_blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, RenderPass};
 use vulkano::swapchain::{
@@ -39,25 +42,65 @@ type FenceFuture = FenceSignalFuture<
 
 pub mod command_builder;
 
-struct Allocators {
+pub const PREMUL_ALPHA: AttachmentBlend = AttachmentBlend {
+    color_blend_op: BlendOp::Add,
+    src_color_blend_factor: BlendFactor::One,
+    dst_color_blend_factor: BlendFactor::OneMinusSrcAlpha,
+    alpha_blend_op: BlendOp::Add,
+    src_alpha_blend_factor: BlendFactor::One,
+    dst_alpha_blend_factor: BlendFactor::OneMinusSrcAlpha,
+};
+
+#[derive(Debug, Clone)]
+pub struct Allocators {
     command_buffer: Arc<StandardCommandBufferAllocator>,
+    descriptor_set: Arc<StandardDescriptorSetAllocator>,
+    memory: Arc<StandardMemoryAllocator>,
 }
 
 impl Allocators {
     fn new(device: Arc<Device>) -> Self {
         let command_buffer = Arc::new(StandardCommandBufferAllocator::new(
-            device,
+            device.clone(),
             Default::default(),
         ));
-        Self { command_buffer }
+        let descriptor_set = Arc::new(StandardDescriptorSetAllocator::new(
+            device.clone(),
+            Default::default(),
+        ));
+        let memory = Arc::new(StandardMemoryAllocator::new_default(device));
+        Self {
+            command_buffer,
+            descriptor_set,
+            memory,
+        }
+    }
+
+    pub fn command_buffer(&self) -> &Arc<StandardCommandBufferAllocator> {
+        &self.command_buffer
+    }
+
+    pub fn descriptor_set(&self) -> &Arc<StandardDescriptorSetAllocator> {
+        &self.descriptor_set
+    }
+
+    pub fn memory(&self) -> &Arc<StandardMemoryAllocator> {
+        &self.memory
     }
 }
 
 struct Shared {
-    device: Arc<Device>,
+    window_inner_size: Box<dyn Fn() -> [u32; 2] + Send + Sync>,
     queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     allocators: Allocators,
+}
+
+impl Shared {
+    #[inline(always)]
+    fn device(&self) -> &Arc<Device> {
+        self.queue.device()
+    }
 }
 
 struct SharedMut {
@@ -66,6 +109,7 @@ struct SharedMut {
     framebuffers: Box<[Arc<Framebuffer>]>,
     fences: Box<[Option<Arc<FenceFuture>>]>,
     prev_fence_index: usize,
+    need_recreate_swapchain: bool,
 }
 
 impl SharedMut {
@@ -112,10 +156,14 @@ impl SharedMut {
         clear_color: [f32; 4],
         add_commands: impl FnOnce(&mut CommandBuilder),
     ) {
-        let device = &shared.device;
+        let device = shared.device();
         let queue = &shared.queue;
         let render_pass = &shared.render_pass;
         let allocators = &shared.allocators;
+
+        core::mem::take(&mut self.need_recreate_swapchain).then(|| {
+            self.resize(render_pass, (*shared.window_inner_size)());
+        });
 
         let (image_index, suboptimal, acquire_future) =
             match vulkano::swapchain::acquire_next_image(self.swapchain.clone(), None)
@@ -123,19 +171,14 @@ impl SharedMut {
             {
                 Ok(r) => r,
                 Err(VulkanError::OutOfDate) => {
-                    self.resize(render_pass, self.swapchain.image_extent());
+                    self.need_recreate_swapchain = true;
                     return;
                 }
                 Err(e) => panic!("failed to acquire next image: {e}"),
             };
         let image_index = image_index as usize;
 
-        suboptimal.then(|| self.resize(render_pass, self.swapchain.image_extent()));
-
-        unsafe {
-            std::hint::assert_unchecked(image_index < self.fences.len());
-            std::hint::assert_unchecked(self.prev_fence_index < self.fences.len());
-        }
+        suboptimal.then(|| self.need_recreate_swapchain = true);
 
         let prev_future = match self
             .fences
@@ -181,7 +224,7 @@ impl SharedMut {
         let new_fence = match future {
             Ok(fence) => Some(Arc::new(fence)),
             Err(VulkanError::OutOfDate) => {
-                self.resize(render_pass, self.swapchain.image_extent());
+                self.need_recreate_swapchain = true;
                 None
             }
             Err(e) => {
@@ -191,11 +234,23 @@ impl SharedMut {
         };
 
         let fence = self.fences.get_mut(image_index).expect("unreachable");
-        std::mem::replace(fence, new_fence)
+        core::mem::replace(fence, new_fence)
             .map(|f| f.wait(None).expect("failed to wait for fence"));
 
         self.prev_fence_index = image_index;
     }
+}
+
+pub struct RendererCreateInfo<Window, WindowInnerSize>
+where
+    Window: WindowLike,
+    WindowInnerSize: Fn() -> [u32; 2] + Send + Sync + 'static,
+{
+    pub window: Arc<Window>,
+    pub window_inner_size: WindowInnerSize,
+    pub desire_image_count: u32,
+    pub device_extensions: DeviceExtensions,
+    pub device_features: DeviceFeatures,
 }
 
 pub struct Renderer {
@@ -207,22 +262,33 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(
-        window: Arc<impl WindowLike>,
-        window_inner_size: [u32; 2],
-        desire_image_count: u32,
-        event_loop: &impl HasDisplayHandle,
-    ) -> Self {
-        let instance = instance::from_event_loop(event_loop);
+    pub fn new<A, B>(create_info: RendererCreateInfo<A, B>) -> Self
+    where
+        A: WindowLike,
+        B: Fn() -> [u32; 2] + Send + Sync + 'static,
+    {
+        let RendererCreateInfo {
+            window,
+            window_inner_size,
+            desire_image_count,
+            device_extensions,
+            device_features,
+        } = create_info;
+        let instance = instance::from_event_loop(&window);
         let physical_device = instance
             .enumerate_physical_devices()
             .expect("No physical device available")
             .next()
             .expect("No physical device available");
-        let (device, queue) = device::from_phisical_device(physical_device.clone());
+        let queue = device::from_phisical_device(
+            physical_device.clone(),
+            device_extensions,
+            device_features,
+        );
+        let device = queue.device();
         let (swapchain, swapchain_images) = swapchain::create(
             window,
-            window_inner_size,
+            window_inner_size(),
             instance.clone(),
             device.clone(),
             &physical_device,
@@ -234,7 +300,7 @@ impl Renderer {
         let fences = (0..swapchain_images.len()).map(|_| None).collect();
         let shared = {
             let shared = Shared {
-                device,
+                window_inner_size: Box::new(window_inner_size),
                 queue,
                 render_pass,
                 allocators,
@@ -245,6 +311,7 @@ impl Renderer {
                 framebuffers,
                 fences,
                 prev_fence_index: 0,
+                need_recreate_swapchain: false,
             });
             Arc::new((shared, shared_mut))
         };
@@ -258,11 +325,19 @@ impl Renderer {
     }
 
     pub fn device(&self) -> &Arc<Device> {
-        &self.shared.0.device
+        self.shared.0.device()
+    }
+
+    pub fn queue(&self) -> &Arc<Queue> {
+        &self.shared.0.queue
     }
 
     pub fn render_pass(&self) -> &Arc<RenderPass> {
         &self.shared.0.render_pass
+    }
+
+    pub fn allocators(&self) -> &Allocators {
+        &self.shared.0.allocators
     }
 
     pub fn resize(&mut self, new_size: [u32; 2]) {
