@@ -174,7 +174,7 @@ pub fn once_inplace<T: Send>(
 /// caller **must** ensure that `*inner` lives longer than the returned `OnceSender` and
 /// `OnceReceiver`.
 ///
-/// [see also](once_inplace)
+/// see also: [`once_inplace`]
 pub unsafe fn once_inplace_unchecked<T: Send + 'static>(
     inner: &mut MaybeUninit<OnceInner<T>>,
 ) -> (OnceSender<T>, OnceReceiver<T>) {
