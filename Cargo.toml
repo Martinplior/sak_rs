@@ -61,6 +61,9 @@ font = [
     "font-kit/source",
     "dep:owned_ttf_parser",
     "owned_ttf_parser/std",
+    "dep:fontdue",
+    "fontdue/hashbrown",
+    "fontdue/simd",
     "dep:thiserror",
 ]
 
@@ -68,12 +71,13 @@ font = [
 windows = { version = "0.61.3", default-features = false, optional = true }
 parking_lot = { version = "0.12.4", default-features = false, optional = true }
 crossbeam-channel = { version = "0.5.15", default-features = false, optional = true }
-rfd = { version = "0.15.3", default-features = false, optional = true }
+rfd = { version = "0.15.4", default-features = false, optional = true }
 tinyrand = { version = "0.5.0", default-features = false, optional = true }
 vulkano = { version = "0.35.1", default-features = false, optional = true }
 raw-window-handle = { version = "0.6.2", default-features = false, optional = true }
 font-kit = { version = "0.14.3", default-features = false, optional = true }
 owned_ttf_parser = { version = "0.25.0", default-features = false, optional = true }
+fontdue = { version = "0.9.3", default-features = false, optional = true }
 thiserror = { version = "2.0.12", default-features = false, optional = true }
 
 [lints.rust]
