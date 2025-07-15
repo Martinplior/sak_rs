@@ -1,4 +1,4 @@
-use std::mem::ManuallyDrop;
+use std::mem::MaybeUninit;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -11,6 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::PCWSTR;
 
 use crate::os::windows::panic_from_win32;
+use crate::sync::spsc::{self, OnceSender};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WinMsg {
@@ -20,7 +21,7 @@ pub struct WinMsg {
 
 pub struct GlobalListener {
     msg_hwnd: HWND,
-    thread: ManuallyDrop<JoinHandle<()>>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl GlobalListener {
@@ -31,7 +32,8 @@ impl GlobalListener {
         register_raw_input_hook: impl FnOnce(&HWND) + Send + 'static,
     ) -> Self {
         Self::init_window_class();
-        let (hwnd_sender, hwnd_receiver) = crate::sync::spsc::once();
+        let mut once_buf = MaybeUninit::uninit();
+        let (hwnd_sender, hwnd_receiver) = unsafe { spsc::once_inplace_unchecked(&mut once_buf) };
         let thread = std::thread::spawn(|| {
             Self::thread_main(msg_hook, register_raw_input_hook, hwnd_sender)
         });
@@ -39,10 +41,16 @@ impl GlobalListener {
         let msg_hwnd = HWND(msg_hwnd as _);
         Self {
             msg_hwnd,
-            thread: ManuallyDrop::new(thread),
+            thread: Some(thread),
         }
     }
 
+    pub fn join(mut self) -> std::thread::Result<()> {
+        unsafe { self.join_by_ref().unwrap_unchecked() }
+    }
+}
+
+impl GlobalListener {
     const fn window_class_name() -> PCWSTR {
         windows::core::w!("global_listener_window_class")
     }
@@ -74,10 +82,17 @@ impl GlobalListener {
         });
     }
 
+    fn join_by_ref(&mut self) -> Option<std::thread::Result<()>> {
+        self.thread.take().map(|j| {
+            let _ = unsafe { PostMessageW(Some(self.msg_hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+            j.join()
+        })
+    }
+
     fn thread_main(
         mut msg_hook: impl FnMut(&WinMsg) -> bool,
         register_raw_input_hook: impl FnOnce(&HWND),
-        hwnd_sender: crate::sync::spsc::OnceSender<usize>,
+        hwnd_sender: OnceSender<usize>,
     ) {
         let hwnd = unsafe {
             CreateWindowExW(
@@ -121,9 +136,6 @@ impl GlobalListener {
 
 impl Drop for GlobalListener {
     fn drop(&mut self) {
-        let _ = unsafe { PostMessageW(Some(self.msg_hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
-        unsafe { ManuallyDrop::take(&mut self.thread) }
-            .join()
-            .expect("global listener thread panicked");
+        self.join_by_ref().map(|r| r.expect("GlobalListener panic"));
     }
 }
