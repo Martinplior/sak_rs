@@ -8,6 +8,7 @@ use vulkano::{
     device::Queue,
     pipeline::graphics::viewport::Viewport,
     render_pass::Framebuffer,
+    swapchain::Swapchain,
 };
 
 pub struct CommandBuilder {
@@ -24,14 +25,16 @@ impl CommandBuilder {
 
 impl CommandBuilder {
     pub(crate) fn new(
-        default_viewport: Viewport,
         allocator: Arc<impl CommandBufferAllocator>,
+        swapchain: &Swapchain,
         queue: &Queue,
-        framebuffers: &[Arc<Framebuffer>],
-        image_index: usize,
+        framebuffer: Arc<Framebuffer>,
         clear_color: [f32; 4],
     ) -> Self {
-        let framebuffer = unsafe { framebuffers.get(image_index).unwrap_unchecked() };
+        let default_viewport = Viewport {
+            extent: swapchain.image_extent().map(|x| x as f32),
+            ..Default::default()
+        };
         let mut builder = AutoCommandBufferBuilder::primary(
             allocator,
             queue.queue_family_index(),
@@ -42,7 +45,7 @@ impl CommandBuilder {
             .begin_render_pass(
                 RenderPassBeginInfo {
                     clear_values: vec![Some(clear_color.into())],
-                    ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
+                    ..RenderPassBeginInfo::framebuffer(framebuffer)
                 },
                 Default::default(),
             )

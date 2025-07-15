@@ -11,7 +11,6 @@ use vulkano::device::{Device, DeviceExtensions, DeviceFeatures, Queue};
 use vulkano::image::Image;
 use vulkano::memory::allocator::StandardMemoryAllocator;
 use vulkano::pipeline::graphics::color_blend::{AttachmentBlend, BlendFactor, BlendOp};
-use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, RenderPass};
 use vulkano::swapchain::{
     PresentFuture, PresentMode, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
@@ -132,19 +131,6 @@ struct SharedMut {
 }
 
 impl SharedMut {
-    fn recreate_swapchain(
-        &mut self,
-        render_pass: &Arc<RenderPass>,
-        create_info: SwapchainCreateInfo,
-    ) {
-        let (new_swapchain, new_swapchain_images) =
-            swapchain::recreate(&self.swapchain, create_info);
-        let new_framebuffers = framebuffers::create(&new_swapchain_images, render_pass);
-        self.swapchain = new_swapchain;
-        self.swapchain_images = new_swapchain_images;
-        self.framebuffers = new_framebuffers;
-    }
-
     fn render(
         &mut self,
         shared: &Shared,
@@ -156,33 +142,7 @@ impl SharedMut {
         let render_pass = &shared.render_pass;
         let allocators = &shared.allocators;
 
-        let need_recreate_swapchain = shared.need_recreate_swapchain.lock().take();
-        let need_resize = core::mem::take(&mut self.need_resize);
-        let need_recreate_swapchain = match (need_recreate_swapchain, need_resize) {
-            (Some(n), true) => Some(n.with_new_size((*shared.window_inner_size)())),
-            (None, true) => {
-                Some(RecreateSwapchain::default().with_new_size((*shared.window_inner_size)()))
-            }
-            (n, false) => n,
-        };
-        need_recreate_swapchain.map(|r| {
-            let image_extent = r.new_size.unwrap_or_else(|| self.swapchain.image_extent());
-            let present_mode = if let Some(v) = r.new_vsync {
-                if v {
-                    PresentMode::Fifo
-                } else {
-                    PresentMode::Immediate
-                }
-            } else {
-                self.swapchain.present_mode()
-            };
-            let create_info = SwapchainCreateInfo {
-                image_extent,
-                present_mode,
-                ..self.swapchain.create_info()
-            };
-            self.recreate_swapchain(render_pass, create_info);
-        });
+        self.recreate_swapchain_when_need(shared, render_pass);
 
         let (image_index, suboptimal, acquire_future) =
             match vulkano::swapchain::acquire_next_image(self.swapchain.clone(), None)
@@ -214,14 +174,13 @@ impl SharedMut {
         };
 
         let mut command_builder = CommandBuilder::new(
-            Viewport {
-                extent: self.swapchain.image_extent().map(|x| x as f32),
-                ..Default::default()
-            },
             allocators.command_buffer.clone(),
+            &self.swapchain,
             queue,
-            &self.framebuffers,
-            image_index,
+            self.framebuffers
+                .get(image_index)
+                .expect("unreachable")
+                .clone(),
             clear_color,
         );
         add_commands(&mut command_builder);
@@ -257,6 +216,49 @@ impl SharedMut {
             .map(|f| f.wait(None).expect("failed to wait for fence"));
 
         self.prev_fence_index = image_index;
+    }
+
+    fn recreate_swapchain_when_need(&mut self, shared: &Shared, render_pass: &Arc<RenderPass>) {
+        let need_recreate_swapchain = shared.need_recreate_swapchain.lock().take();
+        let need_resize = core::mem::take(&mut self.need_resize);
+        let need_recreate_swapchain = match (need_recreate_swapchain, need_resize) {
+            (Some(n), true) => Some(n.with_new_size((*shared.window_inner_size)())),
+            (None, true) => {
+                Some(RecreateSwapchain::default().with_new_size((*shared.window_inner_size)()))
+            }
+            (n, false) => n,
+        };
+        need_recreate_swapchain.map(|r| {
+            let image_extent = r.new_size.unwrap_or_else(|| self.swapchain.image_extent());
+            let present_mode = if let Some(v) = r.new_vsync {
+                if v {
+                    PresentMode::Fifo
+                } else {
+                    PresentMode::Immediate
+                }
+            } else {
+                self.swapchain.present_mode()
+            };
+            let create_info = SwapchainCreateInfo {
+                image_extent,
+                present_mode,
+                ..self.swapchain.create_info()
+            };
+            self.recreate_swapchain(render_pass, create_info);
+        });
+    }
+
+    fn recreate_swapchain(
+        &mut self,
+        render_pass: &Arc<RenderPass>,
+        create_info: SwapchainCreateInfo,
+    ) {
+        let (new_swapchain, new_swapchain_images) =
+            swapchain::recreate(&self.swapchain, create_info);
+        let new_framebuffers = framebuffers::create(&new_swapchain_images, render_pass);
+        self.swapchain = new_swapchain;
+        self.swapchain_images = new_swapchain_images;
+        self.framebuffers = new_framebuffers;
     }
 }
 
