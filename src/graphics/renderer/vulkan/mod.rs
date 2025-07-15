@@ -94,6 +94,25 @@ struct Shared {
     queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     allocators: Allocators,
+    need_recreate_swapchain: Mutex<Option<RecreateSwapchain>>,
+}
+
+#[derive(Default)]
+struct RecreateSwapchain {
+    new_size: Option<[u32; 2]>,
+    new_vsync: Option<bool>,
+}
+
+impl RecreateSwapchain {
+    fn with_new_size(mut self, new_size: [u32; 2]) -> Self {
+        self.new_size = Some(new_size);
+        self
+    }
+
+    fn with_new_vsync(mut self, new_vsync: bool) -> Self {
+        self.new_vsync = Some(new_vsync);
+        self
+    }
 }
 
 impl Shared {
@@ -109,34 +128,10 @@ struct SharedMut {
     framebuffers: Box<[Arc<Framebuffer>]>,
     fences: Box<[Option<Arc<FenceFuture>>]>,
     prev_fence_index: usize,
-    need_recreate_swapchain: bool,
+    need_resize: bool,
 }
 
 impl SharedMut {
-    fn resize(&mut self, render_pass: &Arc<RenderPass>, new_size: [u32; 2]) {
-        self.recreate_swapchain(
-            render_pass,
-            SwapchainCreateInfo {
-                image_extent: new_size,
-                ..self.swapchain.create_info()
-            },
-        );
-    }
-
-    fn set_vsync(&mut self, render_pass: &Arc<RenderPass>, vsync: bool) {
-        self.recreate_swapchain(
-            render_pass,
-            SwapchainCreateInfo {
-                present_mode: if vsync {
-                    PresentMode::Fifo
-                } else {
-                    PresentMode::Immediate
-                },
-                ..self.swapchain.create_info()
-            },
-        );
-    }
-
     fn recreate_swapchain(
         &mut self,
         render_pass: &Arc<RenderPass>,
@@ -161,8 +156,32 @@ impl SharedMut {
         let render_pass = &shared.render_pass;
         let allocators = &shared.allocators;
 
-        core::mem::take(&mut self.need_recreate_swapchain).then(|| {
-            self.resize(render_pass, (*shared.window_inner_size)());
+        let need_recreate_swapchain = shared.need_recreate_swapchain.lock().take();
+        let need_resize = core::mem::take(&mut self.need_resize);
+        let need_recreate_swapchain = match (need_recreate_swapchain, need_resize) {
+            (Some(n), true) => Some(n.with_new_size((*shared.window_inner_size)())),
+            (None, true) => {
+                Some(RecreateSwapchain::default().with_new_size((*shared.window_inner_size)()))
+            }
+            (n, false) => n,
+        };
+        need_recreate_swapchain.map(|r| {
+            let image_extent = r.new_size.unwrap_or_else(|| self.swapchain.image_extent());
+            let present_mode = if let Some(v) = r.new_vsync {
+                if v {
+                    PresentMode::Fifo
+                } else {
+                    PresentMode::Immediate
+                }
+            } else {
+                self.swapchain.present_mode()
+            };
+            let create_info = SwapchainCreateInfo {
+                image_extent,
+                present_mode,
+                ..self.swapchain.create_info()
+            };
+            self.recreate_swapchain(render_pass, create_info);
         });
 
         let (image_index, suboptimal, acquire_future) =
@@ -171,14 +190,14 @@ impl SharedMut {
             {
                 Ok(r) => r,
                 Err(VulkanError::OutOfDate) => {
-                    self.need_recreate_swapchain = true;
+                    self.need_resize = true;
                     return;
                 }
                 Err(e) => panic!("failed to acquire next image: {e}"),
             };
         let image_index = image_index as usize;
 
-        suboptimal.then(|| self.need_recreate_swapchain = true);
+        suboptimal.then(|| self.need_resize = true);
 
         let prev_future = match self
             .fences
@@ -224,7 +243,7 @@ impl SharedMut {
         let new_fence = match future {
             Ok(fence) => Some(Arc::new(fence)),
             Err(VulkanError::OutOfDate) => {
-                self.need_recreate_swapchain = true;
+                self.need_resize = true;
                 None
             }
             Err(e) => {
@@ -304,6 +323,7 @@ impl Renderer {
                 queue,
                 render_pass,
                 allocators,
+                need_recreate_swapchain: Mutex::new(None),
             };
             let shared_mut = Mutex::new(SharedMut {
                 swapchain,
@@ -311,7 +331,7 @@ impl Renderer {
                 framebuffers,
                 fences,
                 prev_fence_index: 0,
-                need_recreate_swapchain: false,
+                need_resize: false,
             });
             Arc::new((shared, shared_mut))
         };
@@ -340,13 +360,14 @@ impl Renderer {
         &self.shared.0.allocators
     }
 
-    pub fn resize(&mut self, new_size: [u32; 2]) {
-        let new_size = new_size.map(|x| x.max(1));
-        self.shared.1.lock().resize(self.render_pass(), new_size);
-    }
-
     pub fn set_vsync(&mut self, vsync: bool) {
-        self.shared.1.lock().set_vsync(self.render_pass(), vsync);
+        let mut guard = self.shared.0.need_recreate_swapchain.lock();
+        let n = if let Some(n) = guard.take() {
+            n.with_new_vsync(vsync)
+        } else {
+            RecreateSwapchain::default().with_new_vsync(vsync)
+        };
+        *guard = Some(n);
     }
 
     pub fn render(&mut self, add_commands: impl FnOnce(&mut CommandBuilder) + Send + 'static) {
