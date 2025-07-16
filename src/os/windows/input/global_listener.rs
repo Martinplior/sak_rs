@@ -25,7 +25,7 @@ pub struct GlobalListener {
 }
 
 impl GlobalListener {
-    /// `msg_hook`: return true if you dont't want msg to be dispatched.
+    /// `msg_hook`: return true if you don't want msg to be dispatched.
     /// `register_raw_input_hook`: register your raw input.
     pub fn new(
         msg_hook: impl FnMut(&WinMsg) -> bool + Send + 'static,
