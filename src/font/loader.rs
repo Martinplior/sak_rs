@@ -24,7 +24,7 @@ impl SystemFontsLoader {
         self.source.all_families()
     }
 
-    pub fn load_by_family_name(&self, family_name: &str) -> Result<Box<[u8]>, LoadFontError> {
+    pub fn load_by_family_name(&self, family_name: &str) -> Result<Vec<u8>, LoadFontError> {
         let family_handle = self.source.select_family_by_name(family_name)?;
         let first_font_handle = family_handle.fonts().first().expect("unreachable");
         let font_data = first_font_handle
@@ -32,7 +32,7 @@ impl SystemFontsLoader {
             .copy_font_data()
             .expect("unreachable");
         let data = owned_ttf_parser::OwnedFace::from_vec((*font_data).clone(), 0)?;
-        Ok(data.into_vec().into_boxed_slice())
+        Ok(data.into_vec())
     }
 }
 

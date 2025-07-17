@@ -24,10 +24,8 @@ impl FontFallbackList {
     }
 
     /// Returns `None` if `ch` is not present in any of the fonts.
-    pub fn rasterize(&self, ch: char, px: f32) -> Option<(Metrics, Box<[u8]>)> {
-        self.font(ch)
-            .map(|f| f.rasterize(ch, px))
-            .map(|(m, v)| (m, v.into_boxed_slice()))
+    pub fn rasterize(&self, ch: char, px: f32) -> Option<(Metrics, Vec<u8>)> {
+        self.font(ch).map(|f| f.rasterize(ch, px))
     }
 
     /// Returns `None` if `ch` is not present in any of the fonts.
