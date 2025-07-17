@@ -192,6 +192,11 @@ impl LineLayout {
     pub fn layout(&self) -> &[CharLayout] {
         &self.layout
     }
+
+    #[inline]
+    pub fn into_layout(self) -> Vec<CharLayout> {
+        self.layout
+    }
 }
 
 impl LineLayout {
