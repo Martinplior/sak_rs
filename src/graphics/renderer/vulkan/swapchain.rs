@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{num::NonZero, sync::Arc};
 
 use vulkano::{
     device::{Device, physical::PhysicalDevice},
@@ -16,7 +16,8 @@ pub(crate) fn create(
     instance: Arc<Instance>,
     device: Arc<Device>,
     physical_device: &PhysicalDevice,
-    desire_image_count: u32,
+    desire_image_format: Option<Format>,
+    desire_image_count: Option<NonZero<u32>>,
 ) -> (Arc<Swapchain>, Box<[Arc<Image>]>) {
     let surface = Surface::from_window(instance, window).expect("Failed to create surface");
     let capabilities = physical_device
@@ -28,17 +29,20 @@ pub(crate) fn create(
         .next()
         .expect("Failed to get composite alpha mode");
     let image_format = {
-        let desire = Format::B8G8R8A8_SRGB;
         let image_formats = physical_device
             .surface_formats(&surface, Default::default())
             .expect("Failed to get surface formats");
+        let first_image_format = image_formats.first().expect("unreachable").0;
+        let desire_image_format = desire_image_format.unwrap_or(first_image_format);
         image_formats
             .iter()
-            .find(|&(f, _)| f == &desire)
-            .expect("Failed to find suitable image format");
-        desire
+            .find_map(|&(f, _)| (f == desire_image_format).then(|| f))
+            .unwrap_or_else(|| {
+                eprintln!("Failed to find desire image format: {desire_image_format:?}");
+                first_image_format
+            })
     };
-    let min_image_count = desire_image_count.clamp(
+    let min_image_count = desire_image_count.map_or(2, |x| x.get()).clamp(
         capabilities.min_image_count,
         capabilities.max_image_count.unwrap_or(u32::MAX),
     );

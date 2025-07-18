@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::num::NonZero;
 use std::sync::Arc;
 
 use command_builder::CommandBuilder;
@@ -8,6 +9,7 @@ use vulkano::command_buffer::CommandBufferExecFuture;
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::{Device, DeviceExtensions, DeviceFeatures, Queue};
+use vulkano::format::Format;
 use vulkano::image::Image;
 use vulkano::memory::allocator::StandardMemoryAllocator;
 use vulkano::pipeline::graphics::color_blend::{AttachmentBlend, BlendFactor, BlendOp};
@@ -269,7 +271,8 @@ where
 {
     pub window: Arc<Window>,
     pub window_inner_size: WindowInnerSize,
-    pub desire_image_count: u32,
+    pub desire_image_format: Option<Format>,
+    pub desire_image_count: Option<NonZero<u32>>,
     pub device_extensions: DeviceExtensions,
     pub device_features: DeviceFeatures,
 }
@@ -291,6 +294,7 @@ impl Renderer {
         let RendererCreateInfo {
             window,
             window_inner_size,
+            desire_image_format,
             desire_image_count,
             device_extensions,
             device_features,
@@ -313,6 +317,7 @@ impl Renderer {
             instance.clone(),
             device.clone(),
             &physical_device,
+            desire_image_format,
             desire_image_count,
         );
         let allocators = Allocators::new(device.clone());
