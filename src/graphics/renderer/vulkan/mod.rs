@@ -1,3 +1,11 @@
+pub mod mipmap;
+
+mod device;
+mod framebuffers;
+mod instance;
+mod render_pass;
+mod swapchain;
+
 use std::any::Any;
 use std::num::NonZero;
 use std::sync::Arc;
@@ -24,12 +32,6 @@ use vulkano::{Validated, VulkanError};
 
 use crate::sync::spsc::OnceReceiver;
 use crate::thread::WorkerThread;
-
-mod device;
-mod framebuffers;
-mod instance;
-mod render_pass;
-mod swapchain;
 
 pub trait WindowLike: HasWindowHandle + HasDisplayHandle + Any + Send + Sync {}
 
