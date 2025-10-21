@@ -8,7 +8,7 @@ use vulkano::{
     swapchain::{PresentMode, Surface, Swapchain, SwapchainCreateInfo},
 };
 
-use crate::graphics::renderer::vulkan::WindowLike;
+use super::WindowLike;
 
 pub(crate) fn create(
     window: Arc<impl WindowLike>,
@@ -36,7 +36,7 @@ pub(crate) fn create(
         let desire_image_format = desire_image_format.unwrap_or(first_image_format);
         image_formats
             .iter()
-            .find_map(|&(f, _)| (f == desire_image_format).then(|| f))
+            .find_map(|&(f, _)| (f == desire_image_format).then_some(f))
             .unwrap_or_else(|| {
                 eprintln!("Failed to find desire image format: {desire_image_format:?}");
                 first_image_format
