@@ -117,9 +117,7 @@ impl<T> OnceReceiver<T> {
 
     /// Receive the one-time value inplace.
     pub fn try_recv_inplace(this: &mut Option<Self>) -> Option<T> {
-        let Some(receiver) = this.take() else {
-            return None;
-        };
+        let receiver = this.take()?;
         match receiver.try_recv() {
             Ok(r) => Some(r),
             Err(err) => {
@@ -134,9 +132,7 @@ impl<T> OnceReceiver<T> {
         this: &mut Option<Self>,
         timeout: std::time::Duration,
     ) -> Option<T> {
-        let Some(receiver) = this.take() else {
-            return None;
-        };
+        let receiver = this.take()?;
         match receiver.try_recv_timeout(timeout) {
             Ok(r) => Some(r),
             Err(err) => {

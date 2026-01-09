@@ -114,15 +114,15 @@ pub async fn join<R1, R2>(f1: impl Future<Output = R1>, f2: impl Future<Output =
     let mut r1 = None;
     let mut r2 = None;
     std::future::poll_fn(move |cx| {
-        if r1.is_none() {
-            if let Poll::Ready(r) = f1.as_mut().poll(cx) {
-                r1 = Some(r);
-            }
+        if r1.is_none()
+            && let Poll::Ready(r) = f1.as_mut().poll(cx)
+        {
+            r1 = Some(r);
         }
-        if r2.is_none() {
-            if let Poll::Ready(r) = f2.as_mut().poll(cx) {
-                r2 = Some(r);
-            }
+        if r2.is_none()
+            && let Poll::Ready(r) = f2.as_mut().poll(cx)
+        {
+            r2 = Some(r);
         }
         if r1.is_some() && r2.is_some() {
             let r = unsafe { (r1.take().unwrap_unchecked(), r2.take().unwrap_unchecked()) };

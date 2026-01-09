@@ -55,7 +55,7 @@ pub fn create_image2d_with_mipmaps<L>(
 
     (1..mip_levels).for_each(|i| {
         let default_blit_info = BlitImageInfo::images(image.clone(), image.clone());
-        let default_region = default_blit_info.regions.get(0).expect("unreachable");
+        let default_region = default_blit_info.regions.first().expect("unreachable");
         let region = ImageBlit {
             src_subresource: ImageSubresourceLayers {
                 mip_level: i - 1,
