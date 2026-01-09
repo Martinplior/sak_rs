@@ -4,6 +4,8 @@ version = "0.2.0"
 edition = "2024"
 
 [features]
+default = ["all"]
+
 all = [
     "os",
     "os_windows",
@@ -45,7 +47,7 @@ collections_adapter = ["collections"]
 async = ["sync", "thread"]
 
 thread = ["sync", "dep:crossbeam-channel", "crossbeam-channel/std"]
-thread_async = ["thread", "async", "dep:tinyrand"]
+thread_async = ["thread", "async"]
 
 message_dialog = ["dep:rfd"]
 
@@ -59,9 +61,8 @@ font = [
     "font-kit/source",
     "dep:owned_ttf_parser",
     "owned_ttf_parser/std",
-    "dep:fontdue",
-    "fontdue/hashbrown",
-    "fontdue/simd",
+    "dep:ab_glyph",
+    "ab_glyph/std",
     "dep:thiserror",
 ]
 
@@ -70,13 +71,12 @@ windows = { version = "0.62.2", default-features = false, optional = true }
 parking_lot = { version = "0.12.5", default-features = false, optional = true }
 crossbeam-channel = { version = "0.5.15", default-features = false, optional = true }
 crossbeam-queue = { version = "0.3.12", default-features = false, optional = true }
-rfd = { version = "0.15.4", default-features = false, optional = true }
-tinyrand = { version = "0.5.0", default-features = false, optional = true }
+rfd = { version = "0.17.1", default-features = false, optional = true }
 vulkano = { version = "0.35.2", default-features = false, optional = true }
 raw-window-handle = { version = "0.6.2", default-features = false, optional = true }
 font-kit = { version = "0.14.3", default-features = false, optional = true }
 owned_ttf_parser = { version = "0.25.1", default-features = false, optional = true }
-fontdue = { version = "0.9.3", default-features = false, optional = true }
+ab_glyph = { version = "0.2.32", default-features = false, optional = true }
 thiserror = { version = "2.0.17", default-features = false, optional = true }
 
 [lints.rust]
