@@ -1,14 +1,13 @@
 use std::{
     cell::Cell,
+    collections::LinkedList,
     num::NonZero,
     pin::Pin,
     task::{Poll, Waker},
     thread::JoinHandle,
 };
 
-use crossbeam_channel::{Receiver as MpmcReceiver, Sender as MpmcSender};
-use tinyrand::{RandRange, StdRand};
-
+use crate::sync::mpmc::queue::{UnboundedReceiver as MpmcReceiver, UnboundedSender as MpmcSender};
 use crate::sync::spsc::{self, OnceReceiver, OnceSender};
 
 enum Task {
@@ -19,12 +18,11 @@ enum Task {
 struct RawAsyncThread(JoinHandle<()>);
 
 impl RawAsyncThread {
-    fn with_capacity(task_receiver: MpmcReceiver<Task>, capacity: usize) -> (Self, Waker) {
+    fn new(task_receiver: MpmcReceiver<Task>) -> (Self, Waker) {
         let (waker_sender, waker_receiver) = spsc::once();
 
-        let join_handle = std::thread::spawn(move || {
-            Self::thread_main(task_receiver, waker_sender, NonZero::new(capacity))
-        });
+        let join_handle =
+            std::thread::spawn(move || Self::thread_main(task_receiver, waker_sender));
 
         let waker = waker_receiver.recv();
         (Self(join_handle), waker)
@@ -40,16 +38,8 @@ impl RawAsyncThread {
 
 impl RawAsyncThread {
     #[inline]
-    fn thread_main(
-        task_receiver: MpmcReceiver<Task>,
-        waker_sender: OnceSender<Waker>,
-        capacity: Option<NonZero<usize>>,
-    ) {
-        let mut tasks = if let Some(capacity) = capacity {
-            Vec::with_capacity(capacity.into())
-        } else {
-            Vec::new()
-        };
+    fn thread_main(task_receiver: MpmcReceiver<Task>, waker_sender: OnceSender<Waker>) {
+        let mut tasks = LinkedList::new();
         let mut need_exit = false;
         let mut waker_sender = Some(waker_sender);
 
@@ -62,7 +52,7 @@ impl RawAsyncThread {
                 // `Task::Exit` in the channel.
                 let _ = task_receiver.try_iter().try_for_each(|task| match task {
                     Task::Task(task) => {
-                        tasks.push(task);
+                        tasks.push_back(task);
                         Ok(())
                     }
                     Task::Exit => {
@@ -73,7 +63,9 @@ impl RawAsyncThread {
             }
 
             // step 2: poll futures, retain pending ones.
-            tasks.retain_mut(|f| f.as_mut().poll(cx).is_pending());
+            tasks
+                .extract_if(|f| f.as_mut().poll(cx).is_ready())
+                .for_each(drop);
 
             if need_exit && tasks.is_empty() {
                 // ready means exit.
@@ -103,14 +95,9 @@ impl Default for AsyncThread {
 }
 
 impl AsyncThread {
-    #[inline]
     pub fn new() -> Self {
-        Self::with_capacity(0)
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        let (task_sender, task_receiver) = crossbeam_channel::unbounded();
-        let (raw, waker) = RawAsyncThread::with_capacity(task_receiver, capacity);
+        let (task_sender, task_receiver) = crate::sync::mpmc::queue::unbounded();
+        let (raw, waker) = RawAsyncThread::new(task_receiver);
         Self {
             raw: Some(raw),
             task_sender,
@@ -144,9 +131,7 @@ impl AsyncThread {
         task_iter: impl IntoIterator<Item = impl Future<Output = ()> + Send + 'static>,
     ) {
         task_iter.into_iter().for_each(|task| {
-            self.task_sender
-                .send(Task::Task(Box::pin(task)))
-                .expect("unreachable");
+            self.task_sender.send(Task::Task(Box::pin(task)));
         });
         self.waker.wake_by_ref();
     }
@@ -158,7 +143,7 @@ impl AsyncThread {
 
 impl AsyncThread {
     fn send_and_wake(&self, task: Task) {
-        self.task_sender.send(task).expect("unreachable");
+        self.task_sender.send(task);
         self.waker.wake_by_ref();
     }
 
@@ -183,30 +168,23 @@ pub struct AsyncThreadPool {
     workers: Option<Box<[RawAsyncThread]>>,
     wakers: Box<[Waker]>,
     task_sender: MpmcSender<Task>,
-    rnd: Cell<StdRand>,
+    index_to_wake: Cell<usize>,
 }
 
 impl AsyncThreadPool {
-    #[inline]
     pub fn new(num_workers: NonZero<usize>) -> Self {
-        Self::with_capacity(num_workers, 0)
-    }
-
-    pub fn with_capacity(num_workers: NonZero<usize>, capacity: usize) -> Self {
         let num_workers = num_workers.get();
-        let (task_sender, task_receiver) = crossbeam_channel::unbounded();
+        let (task_sender, task_receiver) = crate::sync::mpmc::queue::unbounded();
         let (workers, wakers): (Vec<_>, Vec<_>) = (0..num_workers)
-            .map(|_| RawAsyncThread::with_capacity(task_receiver.clone(), capacity))
+            .map(|_| RawAsyncThread::new(task_receiver.clone()))
             .collect();
         let workers = workers.into_boxed_slice();
         let wakers = wakers.into_boxed_slice();
-        // fixed seed? it doesn't really matter imo...
-        let rnd = Cell::default();
         Self {
             workers: Some(workers),
             wakers,
             task_sender,
-            rnd,
+            index_to_wake: Cell::new(0),
         }
     }
 
@@ -242,26 +220,22 @@ impl AsyncThreadPool {
 }
 
 impl AsyncThreadPool {
-    fn send_and_wake(&self, task: Task) {
-        self.task_sender.send(task).expect("unreachable");
-        // just wake a worker randomly...
-        let index = self.rnd_scope(|r| r.next_range(0..self.wakers.len()));
-        unsafe { self.wakers.get_unchecked(index) }.wake_by_ref();
+    fn next_index_to_wake(&self, index_to_wake: usize) -> usize {
+        (index_to_wake + 1) % self.num_workers()
     }
 
-    #[inline]
-    fn rnd_scope<R>(&self, f: impl FnOnce(&mut StdRand) -> R) -> R {
-        let mut rnd = self.rnd.take();
-        let r = f(&mut rnd);
-        self.rnd.set(rnd);
-        r
+    fn send_and_wake(&self, task: Task) {
+        self.task_sender.send(task);
+        let index = self.index_to_wake.get();
+        unsafe { self.wakers.get_unchecked(index) }.wake_by_ref();
+        self.index_to_wake.set(self.next_index_to_wake(index));
     }
 
     fn join_by_ref(&mut self) -> Option<std::thread::Result<()>> {
         self.workers.take().map(|workers| {
             workers
                 .iter()
-                .for_each(|_| self.task_sender.send(Task::Exit).expect("unreachable"));
+                .for_each(|_| self.task_sender.send(Task::Exit));
             self.wakers.iter().for_each(|w| w.wake_by_ref());
             workers.into_iter().try_for_each(|w| w.join())
         })
