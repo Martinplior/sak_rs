@@ -114,6 +114,37 @@ impl<T> OnceReceiver<T> {
             std::thread::park_timeout(remaining);
         }
     }
+
+    /// Receive the one-time value inplace.
+    pub fn try_recv_inplace(this: &mut Option<Self>) -> Option<T> {
+        let Some(receiver) = this.take() else {
+            return None;
+        };
+        match receiver.try_recv() {
+            Ok(r) => Some(r),
+            Err(err) => {
+                *this = Some(err);
+                None
+            }
+        }
+    }
+
+    /// Receive the one-time value inplace with timeout.
+    pub fn try_recv_timeont_inplace(
+        this: &mut Option<Self>,
+        timeout: std::time::Duration,
+    ) -> Option<T> {
+        let Some(receiver) = this.take() else {
+            return None;
+        };
+        match receiver.try_recv_timeout(timeout) {
+            Ok(r) => Some(r),
+            Err(err) => {
+                *this = Some(err);
+                None
+            }
+        }
+    }
 }
 
 impl<T> Drop for OnceReceiver<T> {
