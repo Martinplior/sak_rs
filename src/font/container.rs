@@ -38,6 +38,7 @@ pub struct GlyphMetrics {
     pub height: u32,
 }
 
+/// metrics == px / height_unscaled * metrics_unscaled
 #[derive(Debug)]
 pub struct Font {
     font: FontVec,
@@ -97,6 +98,46 @@ impl Font {
     #[inline]
     pub fn has_glyph(&self, ch: char) -> bool {
         self.font.glyph_id(ch).0 != 0
+    }
+
+    #[inline]
+    pub fn ascent_unscaled(&self) -> f32 {
+        self.font.ascent_unscaled()
+    }
+
+    #[inline]
+    pub fn descent_unscaled(&self) -> f32 {
+        self.font.descent_unscaled()
+    }
+
+    #[inline]
+    pub fn height_unscaled(&self) -> f32 {
+        self.font.height_unscaled()
+    }
+
+    #[inline]
+    pub fn line_gap_unscaled(&self) -> f32 {
+        self.font.line_gap_unscaled()
+    }
+
+    #[inline]
+    pub fn h_advance_unscaled(&self, ch: char) -> f32 {
+        self.font.h_advance_unscaled(self.font.glyph_id(ch))
+    }
+
+    #[inline]
+    pub fn h_side_bearing_unscaled(&self, ch: char) -> f32 {
+        self.font.h_side_bearing_unscaled(self.font.glyph_id(ch))
+    }
+
+    #[inline]
+    pub fn v_advance_unscaled(&self, ch: char) -> f32 {
+        self.font.v_advance_unscaled(self.font.glyph_id(ch))
+    }
+
+    #[inline]
+    pub fn v_side_bearing_unscaled(&self, ch: char) -> f32 {
+        self.font.v_side_bearing_unscaled(self.font.glyph_id(ch))
     }
 
     #[inline]
@@ -181,6 +222,7 @@ mod tests {
             dbg!(font.h_side_bearing(ch, px));
             dbg!(font.v_advance(ch, px));
             dbg!(font.v_side_bearing(ch, px));
+            assert!(px / font.height_unscaled() * font.ascent_unscaled() == font.ascent(px));
         });
     }
 }
