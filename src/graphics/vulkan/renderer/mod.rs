@@ -363,6 +363,9 @@ impl Renderer {
             .push(RecreateSwapchainType::Vsync(vsync))
     }
 
+    /// blocking until render is finished.
+    ///
+    /// if you don't want to block, use [`try_render`](Self::try_render) instead.
     pub fn render(&mut self, add_commands: impl FnOnce(&mut CommandBuilder) + Send + 'static) {
         let shared = self.shared.clone();
         let clear_color = self.clear_color;
@@ -373,5 +376,23 @@ impl Renderer {
         self.render_receiver
             .replace(new_render_receiver)
             .map(|r| r.recv());
+    }
+
+    /// never blocks, returns true if render is successful.
+    ///
+    /// if you want to block, use [`render`](Self::render) instead.
+    pub fn try_render(
+        &mut self,
+        add_commands: impl FnOnce(&mut CommandBuilder) + Send + 'static,
+    ) -> bool {
+        if let Some(r) = self.render_receiver.take()
+            && let Err(r) = r.try_recv()
+        {
+            self.render_receiver = Some(r);
+            return false;
+        }
+        // self.render_receiver is None here, so self.render never blocks
+        self.render(add_commands);
+        true
     }
 }
