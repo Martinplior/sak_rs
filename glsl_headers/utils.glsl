@@ -69,6 +69,8 @@ double sqr(const double x);
 float cross2(const vec2 a, const vec2 b);
 double cross2(const dvec2 a, const dvec2 b);
 
+
+
 // impl
 
 vec2 remap(const ScreenSize screen_size, const vec2 screen_point) {
@@ -116,6 +118,20 @@ cross2_impl(dvec2, double)
 
 #undef cross2_impl
 
+
+
 // impl end
+
+#ifdef UTILS_FRAGMENT_SHADER_ONLY
+
+float aa_step(const float edge, const float value);
+
+float aa_step(const float edge, const float value) {
+    const float rcp_sqrt2 = 0.70710678; // 1 / sqrt(2)
+    const float df = length(vec2(dFdx(value), dFdy(value))) * rcp_sqrt2;
+    return smoothstep(edge - df, edge + df, value);
+}
+
+#endif // UTILS_FRAGMENT_SHADER_ONLY
 
 #endif // UTILS_GLSL
