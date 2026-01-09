@@ -2,6 +2,6 @@
 pub mod input;
 
 pub fn panic_from_win32() -> ! {
-    let message = windows::core::Error::from_win32().message();
+    let message = windows::core::Error::from_thread().message();
     panic!("{}", message)
 }
