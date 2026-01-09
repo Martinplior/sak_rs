@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crossbeam_queue::{ArrayQueue, SegQueue};
 
-#[derive(Clone)]
 #[repr(transparent)]
 pub struct BoundedReceiver<T> {
     queue: Arc<ArrayQueue<T>>,
@@ -35,7 +34,15 @@ impl<T> BoundedReceiver<T> {
     }
 }
 
-#[derive(Clone)]
+impl<T> Clone for BoundedReceiver<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            queue: self.queue.clone(),
+        }
+    }
+}
+
 #[repr(transparent)]
 pub struct BoundedSender<T> {
     queue: Arc<ArrayQueue<T>>,
@@ -59,7 +66,15 @@ impl<T> BoundedSender<T> {
     }
 }
 
-#[derive(Clone)]
+impl<T> Clone for BoundedSender<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            queue: self.queue.clone(),
+        }
+    }
+}
+
 #[repr(transparent)]
 pub struct UnboundedReceiver<T> {
     queue: Arc<SegQueue<T>>,
@@ -87,7 +102,15 @@ impl<T> UnboundedReceiver<T> {
     }
 }
 
-#[derive(Clone)]
+impl<T> Clone for UnboundedReceiver<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            queue: self.queue.clone(),
+        }
+    }
+}
+
 #[repr(transparent)]
 pub struct UnboundedSender<T> {
     queue: Arc<SegQueue<T>>,
@@ -97,6 +120,15 @@ impl<T> UnboundedSender<T> {
     #[inline]
     pub fn send(&self, value: T) {
         self.queue.push(value)
+    }
+}
+
+impl<T> Clone for UnboundedSender<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            queue: self.queue.clone(),
+        }
     }
 }
 
