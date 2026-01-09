@@ -1,54 +1,52 @@
-use crate::font::FontFallbackList;
+use super::{Font, FontFallbackList};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct LineLayoutMetrics {
-    /// pixel offset of the left-most edge of the bitmap
-    pub x_min: i32,
-    /// pixel offset of the bottom-most edge of the bitmap
-    pub y_min: i32,
-    /// width of the bitmap
-    pub width: u32,
-    /// height of the bitmap
-    pub height: u32,
-    /// advance width of the character
-    pub advance: f32,
+    pub ascent: f32,
+    pub descent: f32,
+    pub h_advance: f32,
+    pub h_side_bearing: f32,
 }
 
 pub trait LineLayoutLibrary {
-    fn metrics(&self, ch: char, px: f32) -> LineLayoutMetrics;
+    /// returns `None` if the character is not supported by the library.
+    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics>;
 }
 
 /// `(0, 0)` is the left-most point of the baseline.
-///
-/// `y` is positive for downward direction.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub struct CharLayout {
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct GlyphLineLayout {
     /// corresponding character
     pub ch: char,
     /// x position of the left-most edge of the bitmap
     pub x: i32,
-    /// y position of the top-most edge of the bitmap
-    pub y: i32,
-    /// width of the bitmap
-    pub width: u32,
-    /// height of the bitmap
-    pub height: u32,
+}
+
+/// `(0, baseline)` is the left-most point of the baseline.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct GlyphMultiLineLayout {
+    /// corresponding character
+    pub ch: char,
+    /// x position of the left-most edge of the bitmap
+    pub x: i32,
+    /// y position of the baseline
+    pub baseline: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Bounds {
+    x_min: f32,
+    y_min: f32,
+    x_max: f32,
+    y_max: f32,
 }
 
 #[derive(Debug, Clone)]
 pub struct LineLayout {
     font_size: f32,
-    cursor_position: f32,
-    bound: Option<Bound>,
-    layout: Vec<CharLayout>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Bound {
-    x_min: i32,
-    x_max: i32,
-    y_min: i32,
-    y_max: i32,
+    cursor: f32,
+    bounds: Bounds,
+    layout: Vec<GlyphLineLayout>,
 }
 
 impl LineLayout {
@@ -77,36 +75,28 @@ impl LineLayout {
         let text = text.as_ref();
         self.layout.reserve(text.len()); // large enough to avoid reallocation
         text.chars().for_each(|ch| {
-            if ch.is_control() {
+            let Some(LineLayoutMetrics {
+                ascent,
+                descent,
+                h_advance,
+                h_side_bearing,
+            }) = library.metrics(ch, self.font_size)
+            else {
                 return;
-            }
-            let metrics = library.metrics(ch, self.font_size);
-            let current_x = self.cursor_position.round() as i32 + metrics.x_min;
-            let current_x_max = current_x + metrics.width as i32;
-            let current_y_min = -(metrics.height as i32 + metrics.y_min);
-            let current_y_max = -metrics.y_min;
-            if let Some(bound) = self.bound.as_mut() {
-                bound.x_max = bound.x_max.max(current_x_max);
-                bound.y_min = bound.y_min.min(current_y_min);
-                bound.y_max = bound.y_max.max(current_y_max);
-            } else {
-                self.bound = Some(Bound {
-                    x_min: metrics.x_min,
-                    x_max: current_x_max,
-                    y_min: current_y_min,
-                    y_max: current_y_max,
-                });
-            }
-            let (x, y) = (current_x, current_y_min);
-            let (width, height) = (metrics.width, metrics.height);
-            self.layout.push(CharLayout {
-                ch,
-                x,
-                y,
-                width,
-                height,
-            });
-            self.cursor_position += metrics.advance;
+            };
+            let current_x = self.cursor + h_side_bearing;
+            let next_cursor = self.cursor + h_advance;
+            let current_y_min = -ascent;
+            let current_y_max = -descent;
+            self.bounds.x_min = self.bounds.x_min.min(current_x).min(next_cursor);
+            self.bounds.x_max = self.bounds.x_max.max(current_x).max(next_cursor);
+            self.bounds.y_min = self.bounds.y_min.min(current_y_min);
+            self.bounds.y_max = self.bounds.y_max.max(current_y_max);
+
+            let x = current_x.round() as i32;
+            self.layout.push(GlyphLineLayout { ch, x });
+
+            self.cursor = next_cursor;
         });
     }
 
@@ -118,20 +108,20 @@ impl LineLayout {
 
     /// bounding box of the text.
     #[inline]
-    pub fn bound(&self) -> Option<&Bound> {
-        self.bound.as_ref()
+    pub fn bounds(&self) -> &Bounds {
+        &self.bounds
     }
 
     /// x center position of the text.
     #[inline]
-    pub fn x_center(&self) -> f32 {
-        self.bound_map_or_default(|bound| (bound.x_min + bound.x_max) as f32 / 2.0)
+    pub fn center_x(&self) -> f32 {
+        (self.bounds.x_min + self.bounds.x_max) / 2.0
     }
 
     /// y center position of the text.
     #[inline]
-    pub fn y_center(&self) -> f32 {
-        self.bound_map_or_default(|bound| (bound.y_max + bound.y_min) as f32 / 2.0)
+    pub fn center_y(&self) -> f32 {
+        (self.bounds.y_max + self.bounds.y_min) / 2.0
     }
 
     /// center position of the text.
@@ -139,43 +129,43 @@ impl LineLayout {
     /// returns `[x, y]`
     #[inline]
     pub fn center(&self) -> [f32; 2] {
-        [self.x_center(), self.y_center()]
+        [self.center_x(), self.center_y()]
     }
 
     /// left-most edge of the text.
     #[inline]
-    pub fn left(&self) -> i32 {
-        self.bound_map_or_default(|bound| bound.x_min)
+    pub fn left(&self) -> f32 {
+        self.bounds.x_min
     }
 
     /// right-most edge of the text.
     #[inline]
-    pub fn right(&self) -> i32 {
-        self.bound_map_or_default(|bound| bound.x_max)
+    pub fn right(&self) -> f32 {
+        self.bounds.x_max
     }
 
     /// bottom-most edge of the text.
     #[inline]
-    pub fn bottom(&self) -> i32 {
-        self.bound_map_or_default(|bound| bound.y_max)
+    pub fn bottom(&self) -> f32 {
+        self.bounds.y_max
     }
 
     /// top-most edge of the text.
     #[inline]
-    pub fn top(&self) -> i32 {
-        self.bound_map_or_default(|bound| bound.y_min)
+    pub fn top(&self) -> f32 {
+        self.bounds.y_min
     }
 
     /// height of the text.
     #[inline]
     pub fn text_height(&self) -> u32 {
-        self.bound_map_or_default(|bound| (bound.y_max - bound.y_min) as u32)
+        (self.bounds.y_max - self.bounds.y_min) as u32
     }
 
     /// width of the text.
     #[inline]
     pub fn text_width(&self) -> u32 {
-        self.bound_map_or_default(|bound| (bound.x_max - bound.x_min) as u32)
+        (self.bounds.x_max - self.bounds.x_min) as u32
     }
 
     /// current cursor position of the text.
@@ -185,60 +175,230 @@ impl LineLayout {
     /// should occupy.
     #[inline]
     pub fn cursor_position(&self) -> f32 {
-        self.cursor_position
+        self.cursor
     }
 
     #[inline]
-    pub fn layout(&self) -> &[CharLayout] {
+    pub fn layout(&self) -> &[GlyphLineLayout] {
         &self.layout
     }
 
     #[inline]
-    pub fn into_layout(self) -> Vec<CharLayout> {
+    pub fn into_layout(self) -> Vec<GlyphLineLayout> {
         self.layout
     }
 }
 
 impl LineLayout {
     #[inline(always)]
-    fn with_vec(font_size: f32, layout: Vec<CharLayout>) -> Self {
+    fn with_vec(font_size: f32, layout: Vec<GlyphLineLayout>) -> Self {
         Self {
             font_size,
-            cursor_position: 0.0,
-            bound: None,
+            cursor: 0.0,
+            bounds: Default::default(),
             layout,
         }
     }
+}
 
-    #[inline(always)]
-    fn bound_map_or_default<T: Default>(&self, f: impl FnOnce(&Bound) -> T) -> T {
-        self.bound.as_ref().map_or(Default::default(), f)
+#[derive(Debug, Clone)]
+pub struct MultiLineLayout {
+    font_size: f32,
+    line_gap: f32,
+    cursor: [f32; 2],
+    bounds: Bounds,
+    layout: Vec<Vec<GlyphMultiLineLayout>>,
+}
+
+impl MultiLineLayout {
+    pub fn new(font_size: f32, line_gap: f32) -> Self {
+        Self {
+            font_size,
+            line_gap,
+            cursor: [0.0; 2],
+            bounds: Default::default(),
+            layout: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        let old_self =
+            core::mem::replace(self, MultiLineLayout::new(self.font_size, self.line_gap));
+        self.layout = old_self.layout;
+        self.layout.clear();
+    }
+
+    #[inline]
+    pub fn reset(&mut self, font_size: f32, line_gap: f32) {
+        self.font_size = font_size;
+        self.line_gap = line_gap;
+        self.clear();
+    }
+
+    pub fn append(&mut self, library: &impl LineLayoutLibrary, text: impl AsRef<str>) {
+        let text = text.as_ref();
+        text.lines().for_each(|line| {
+            self.append_one_line(library, line);
+            self.cursor[0] = 0.0;
+            self.cursor[1] += self.font_size + self.line_gap;
+        });
+    }
+
+    /// font size of the text.
+    #[inline]
+    pub fn font_size(&self) -> f32 {
+        self.font_size
+    }
+
+    /// line gap of the text.
+    #[inline]
+    pub fn line_gap(&self) -> f32 {
+        self.line_gap
+    }
+
+    /// bounding box of the text.
+    #[inline]
+    pub fn bounds(&self) -> &Bounds {
+        &self.bounds
+    }
+
+    /// x center position of the text.
+    #[inline]
+    pub fn center_x(&self) -> f32 {
+        (self.bounds.x_min + self.bounds.x_max) / 2.0
+    }
+
+    /// y center position of the text.
+    #[inline]
+    pub fn center_y(&self) -> f32 {
+        (self.bounds.y_max + self.bounds.y_min) / 2.0
+    }
+
+    /// center position of the text.
+    ///
+    /// returns `[x, y]`
+    #[inline]
+    pub fn center(&self) -> [f32; 2] {
+        [self.center_x(), self.center_y()]
+    }
+
+    /// left-most edge of the text.
+    #[inline]
+    pub fn left(&self) -> f32 {
+        self.bounds.x_min
+    }
+
+    /// right-most edge of the text.
+    #[inline]
+    pub fn right(&self) -> f32 {
+        self.bounds.x_max
+    }
+
+    /// bottom-most edge of the text.
+    #[inline]
+    pub fn bottom(&self) -> f32 {
+        self.bounds.y_max
+    }
+
+    /// top-most edge of the text.
+    #[inline]
+    pub fn top(&self) -> f32 {
+        self.bounds.y_min
+    }
+
+    /// height of the text.
+    #[inline]
+    pub fn text_height(&self) -> u32 {
+        (self.bounds.y_max - self.bounds.y_min) as u32
+    }
+
+    /// width of the text.
+    #[inline]
+    pub fn text_width(&self) -> u32 {
+        (self.bounds.x_max - self.bounds.x_min) as u32
+    }
+
+    /// current cursor position of the text.
+    ///
+    /// Whitespace characters could have zero bitmap width, but advance width may not be zero.
+    /// So [`Self::text_width`] may not include the space that the last whitespace character
+    /// should occupy.
+    #[inline]
+    pub fn cursor_position(&self) -> [f32; 2] {
+        self.cursor
+    }
+
+    #[inline]
+    pub fn layout(&self) -> &[Vec<GlyphMultiLineLayout>] {
+        &self.layout
+    }
+
+    #[inline]
+    pub fn into_layout(self) -> Vec<Vec<GlyphMultiLineLayout>> {
+        self.layout
     }
 }
 
-impl LineLayoutLibrary for fontdue::Font {
-    fn metrics(&self, ch: char, px: f32) -> LineLayoutMetrics {
-        let m = fontdue::Font::metrics(self, ch, px);
-        LineLayoutMetrics {
-            x_min: m.xmin,
-            y_min: m.ymin,
-            width: m.width as u32,
-            height: m.height as u32,
-            advance: m.advance_width,
+impl MultiLineLayout {
+    fn append_one_line(&mut self, library: &impl LineLayoutLibrary, line: &str) {
+        let text_size = line.len();
+        let line_layout = if let Some(line_layout) = self.layout.last_mut() {
+            line_layout.reserve(text_size);
+            line_layout
+        } else {
+            self.layout.push(Vec::with_capacity(text_size));
+            unsafe { self.layout.last_mut().unwrap_unchecked() }
+        };
+        line.chars().for_each(|ch| {
+            let Some(LineLayoutMetrics {
+                ascent,
+                descent,
+                h_advance,
+                h_side_bearing,
+            }) = library.metrics(ch, self.font_size)
+            else {
+                return;
+            };
+            let current_x = self.cursor[0] + h_side_bearing;
+            let next_cursor = self.cursor[0] + h_advance;
+            let current_y_min = self.cursor[1] - ascent;
+            let current_y_max = self.cursor[1] - descent;
+            self.bounds.x_min = self.bounds.x_min.min(current_x).min(next_cursor);
+            self.bounds.x_max = self.bounds.x_max.max(current_x).max(next_cursor);
+            self.bounds.y_min = self.bounds.y_min.min(current_y_min);
+            self.bounds.y_max = self.bounds.y_max.max(current_y_max);
+
+            let x = current_x.round() as i32;
+            let baseline = self.cursor[1].round() as i32;
+            line_layout.push(GlyphMultiLineLayout { ch, x, baseline });
+
+            self.cursor[0] = next_cursor;
+        });
+    }
+}
+
+impl LineLayoutLibrary for Font {
+    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics> {
+        if !self.has_glyph(ch) {
+            return None;
         }
+        Some(LineLayoutMetrics {
+            ascent: self.ascent(px),
+            descent: self.descent(px),
+            h_advance: self.h_advance(ch, px),
+            h_side_bearing: self.h_side_bearing(ch, px),
+        })
     }
 }
 
 impl LineLayoutLibrary for FontFallbackList {
-    fn metrics(&self, ch: char, px: f32) -> LineLayoutMetrics {
-        FontFallbackList::metrics(self, ch, px)
-            .map(|m| LineLayoutMetrics {
-                x_min: m.xmin,
-                y_min: m.ymin,
-                width: m.width as u32,
-                height: m.height as u32,
-                advance: m.advance_width,
-            })
-            .unwrap_or_default()
+    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics> {
+        self.font(ch).map(|font| LineLayoutMetrics {
+            ascent: font.ascent(px),
+            descent: font.descent(px),
+            h_advance: font.h_advance(ch, px),
+            h_side_bearing: font.h_side_bearing(ch, px),
+        })
     }
 }

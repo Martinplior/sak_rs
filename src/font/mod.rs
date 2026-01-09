@@ -1,10 +1,12 @@
 pub mod container;
 pub mod layout;
 pub mod loader;
+pub mod sdf;
 
-pub use container::FontFallbackList;
-pub use layout::LineLayout;
+pub use container::{Font, FontFallbackList, GlyphBitmap, GlyphMetrics};
+pub use layout::{GlyphLineLayout, GlyphMultiLineLayout, LineLayout, MultiLineLayout};
 pub use loader::SystemFontsLoader;
+pub use sdf::{Sdf, SdfGenerator};
 
 /// print bitmap on console.
 pub fn print_bitmap(bitmap: &[u8], width: usize) {
@@ -28,7 +30,8 @@ pub fn print_bitmap(bitmap: &[u8], width: usize) {
 
 #[cfg(test)]
 mod tests {
-    use fontdue::FontSettings;
+
+    use crate::font::layout::LineLayoutLibrary;
 
     use super::*;
 
@@ -36,31 +39,64 @@ mod tests {
     fn test_print_bitmap() {
         let fonts_loader = SystemFontsLoader::new();
         let font_family_names = ["Segoe UI", "Segoe UI emoji"];
-        let fonts: Vec<_> = font_family_names
+        let fonts = font_family_names
             .into_iter()
             .map(|name| {
-                let font_data = fonts_loader.load_by_family_name(name).unwrap();
-                fontdue::Font::from_bytes(
-                    font_data,
-                    FontSettings {
-                        scale: 16.0,
-                        ..Default::default()
-                    },
-                )
-                .unwrap()
+                let data = fonts_loader.load_by_family_name(name).unwrap();
+                Font::try_from_vec(data).unwrap()
             })
             .collect();
-        let font_fallback_list = FontFallbackList::new(fonts).unwrap();
+        let font_fallback_list = FontFallbackList::new(fonts);
         // let text = "é a";
-        let text = "🦌😡🤔 ";
+        let text = "🦌😡🤔abc ";
+        let font_size = 16.0;
         text.chars()
             .inspect(|&ch| {
-                dbg!(font_fallback_list.horizontal_line_metrics(ch, 16.0));
+                dbg!(font_fallback_list.metrics(ch, font_size));
             })
-            .map(|ch| font_fallback_list.rasterize(ch, 16.0).unwrap_or_default())
-            .for_each(|(metrics, bitmap)| {
-                print_bitmap(&bitmap, metrics.width);
-                dbg!(metrics);
+            .map(|ch| {
+                font_fallback_list
+                    .font(ch)
+                    .and_then(|f| f.rasterize(ch, font_size))
+                    .unwrap_or_default()
+            })
+            .for_each(|glyph_bitmap| {
+                print_bitmap(&glyph_bitmap.bitmap, glyph_bitmap.metrics.width as usize);
+            });
+    }
+
+    #[test]
+    fn test_print_sdf_bitmap() {
+        let fonts_loader = SystemFontsLoader::new();
+        let font_family_names = ["Segoe UI", "Segoe UI emoji"];
+        let fonts = font_family_names
+            .into_iter()
+            .map(|name| {
+                let data = fonts_loader.load_by_family_name(name).unwrap();
+                Font::try_from_vec(data).unwrap()
+            })
+            .collect();
+        let font_fallback_list = FontFallbackList::new(fonts);
+        // let text = "é a";
+        let text = "🦌😡🤔abc ";
+        let mut sdf_generator = SdfGenerator::new(8, 8.0, 0.25);
+
+        let font_size = 64.0;
+
+        text.chars()
+            .inspect(|&ch| {
+                dbg!(font_fallback_list.metrics(ch, font_size));
+            })
+            .map(|ch| {
+                font_fallback_list
+                    .font(ch)
+                    .and_then(|f| f.rasterize(ch, font_size))
+                    .unwrap_or_default()
+            })
+            .for_each(|glyph_bitmap| {
+                let sdf = sdf_generator.generate(&glyph_bitmap.bitmap, glyph_bitmap.metrics.width);
+                print_bitmap(&sdf.bitmap, sdf.width as _);
+                println!("width: {}, height: {}", sdf.width, sdf.height);
             });
     }
 
