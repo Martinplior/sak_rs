@@ -31,7 +31,8 @@ mod tests {
             if win_msg.msg.message != WM_INPUT {
                 return false;
             }
-            let raw_input::RawInput::Mouse(mouse) = raw_input::RawInput::from_msg(&win_msg.msg)
+            let raw_input::RawInput::Mouse(mouse) =
+                raw_input::RawInput::from_msg(&win_msg.msg).unwrap()
             else {
                 return false;
             };
@@ -40,7 +41,7 @@ mod tests {
             std::io::stdout().flush().unwrap();
             false
         };
-        let raw_input_hook = |hwnd: &HWND| {
+        let raw_input_hook = |hwnd: &_| {
             raw_input::device::register(
                 raw_input::device::DeviceType::Mouse,
                 raw_input::device::OptionType::inputsink(*hwnd),

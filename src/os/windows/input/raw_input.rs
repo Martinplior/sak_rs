@@ -11,7 +11,7 @@ use windows::Win32::UI::{
         MSG, RI_KEY_E0, RI_KEY_E1, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP,
         RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL, RI_MOUSE_LEFT_BUTTON_DOWN,
         RI_MOUSE_LEFT_BUTTON_UP, RI_MOUSE_MIDDLE_BUTTON_DOWN, RI_MOUSE_MIDDLE_BUTTON_UP,
-        RI_MOUSE_RIGHT_BUTTON_DOWN, RI_MOUSE_RIGHT_BUTTON_UP, RI_MOUSE_WHEEL,
+        RI_MOUSE_RIGHT_BUTTON_DOWN, RI_MOUSE_RIGHT_BUTTON_UP, RI_MOUSE_WHEEL, WM_INPUT,
     },
 };
 
@@ -216,7 +216,12 @@ pub enum RawInput {
 }
 
 impl RawInput {
-    pub fn from_msg(msg: &MSG) -> Self {
+    /// returns None if msg.message is not WM_INPUT
+    pub fn from_msg(msg: &MSG) -> Option<Self> {
+        if msg.message != WM_INPUT {
+            return None;
+        }
+
         let RAWINPUT { header, data } = {
             let mut raw_input = MaybeUninit::<RAWINPUT>::uninit();
             let mut size = std::mem::size_of::<RAWINPUT>() as _;
@@ -235,7 +240,7 @@ impl RawInput {
             }
             unsafe { raw_input.assume_init() }
         };
-        match RID_DEVICE_INFO_TYPE(header.dwType) {
+        let r = match RID_DEVICE_INFO_TYPE(header.dwType) {
             RIM_TYPEKEYBOARD => Self::Keyboard(Keyboard {
                 header,
                 data: unsafe { data.keyboard },
@@ -249,7 +254,8 @@ impl RawInput {
                 data: unsafe { data.hid },
             }),
             _ => unsafe { std::hint::unreachable_unchecked() },
-        }
+        };
+        Some(r)
     }
 }
 
