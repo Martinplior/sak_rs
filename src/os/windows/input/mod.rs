@@ -27,19 +27,18 @@ mod tests {
 
     #[test]
     fn test_mouse_input() {
-        let msg_hook = |win_msg: &WinMsg| {
-            if win_msg.msg.message != WM_INPUT {
-                return false;
+        let msg_hook = {
+            let mut reader = raw_input::RawInputBufReader::new();
+            move |win_msg: &WinMsg| {
+                let Some(raw_input::RawData::Mouse(mouse)) = reader.read_from_msg(&win_msg.msg)
+                else {
+                    return false;
+                };
+                print!("\r{}", " ".repeat(80));
+                print!("\rflags: {:#b}", mouse.flags_and_data().usButtonFlags);
+                std::io::stdout().flush().unwrap();
+                false
             }
-            let raw_input::RawInput::Mouse(mouse) =
-                raw_input::RawInput::from_msg(&win_msg.msg).unwrap()
-            else {
-                return false;
-            };
-            print!("\r{}", " ".repeat(80));
-            print!("\rflags: {:#b}", mouse.flags_and_data().usButtonFlags);
-            std::io::stdout().flush().unwrap();
-            false
         };
         let raw_input_hook = |hwnd: &_| {
             raw_input::device::register(

@@ -1,9 +1,7 @@
-use std::mem::MaybeUninit;
-
 use windows::Win32::UI::{
     Input::{
         GetRawInputData, HRAWINPUT, KeyboardAndMouse::VIRTUAL_KEY, MOUSE_ATTRIBUTES_CHANGED,
-        MOUSE_MOVE_NOCOALESCE, MOUSE_VIRTUAL_DESKTOP, RAWHID, RAWINPUT, RAWINPUTHEADER,
+        MOUSE_MOVE_NOCOALESCE, MOUSE_VIRTUAL_DESKTOP, RAWHID, RAWINPUT, RAWINPUT_0, RAWINPUTHEADER,
         RAWKEYBOARD, RAWMOUSE, RAWMOUSE_0_0, RID_DEVICE_INFO_TYPE, RID_INPUT, RIM_TYPEHID,
         RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
     },
@@ -18,37 +16,34 @@ use windows::Win32::UI::{
 use crate::os::windows::panic_from_win32;
 
 /// [see also](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawkeyboard)
-#[repr(C)]
-#[derive(Clone)]
-pub struct Keyboard {
-    pub header: RAWINPUTHEADER,
-    pub data: RAWKEYBOARD,
+pub struct Keyboard<'a> {
+    pub raw: &'a RAWKEYBOARD,
 }
 
-impl Keyboard {
+impl<'a> Keyboard<'a> {
     #[inline]
     pub fn make_code(&self) -> u16 {
-        self.data.MakeCode
+        self.raw.MakeCode
     }
 
     #[inline]
     pub fn virtual_key(&self) -> VIRTUAL_KEY {
-        VIRTUAL_KEY(self.data.VKey)
+        VIRTUAL_KEY(self.raw.VKey)
     }
 
     #[inline]
     pub fn message(&self) -> u32 {
-        self.data.Message
+        self.raw.Message
     }
 
     #[inline]
     pub fn extra_information(&self) -> u32 {
-        self.data.ExtraInformation
+        self.raw.ExtraInformation
     }
 
     #[inline]
     pub fn key_is_down(&self) -> bool {
-        self.data.Flags & 1 == 0
+        self.raw.Flags & 1 == 0
     }
 
     #[inline]
@@ -58,27 +53,24 @@ impl Keyboard {
 
     #[inline]
     pub fn has_e0(&self) -> bool {
-        self.data.Flags & (RI_KEY_E0 as u16) != 0
+        self.raw.Flags & (RI_KEY_E0 as u16) != 0
     }
 
     #[inline]
     pub fn has_e1(&self) -> bool {
-        self.data.Flags & (RI_KEY_E1 as u16) != 0
+        self.raw.Flags & (RI_KEY_E1 as u16) != 0
     }
 }
 
 /// [see also](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawmouse)
-#[repr(C)]
-#[derive(Clone)]
-pub struct Mouse {
-    pub header: RAWINPUTHEADER,
-    pub data: RAWMOUSE,
+pub struct Mouse<'a> {
+    pub raw: &'a RAWMOUSE,
 }
 
-impl Mouse {
+impl<'a> Mouse<'a> {
     #[inline]
     pub fn is_move_relative(&self) -> bool {
-        self.data.usFlags.0 & 1 == 0
+        self.raw.usFlags.0 & 1 == 0
     }
 
     #[inline]
@@ -88,37 +80,37 @@ impl Mouse {
 
     #[inline]
     pub fn is_virtual_desktop(&self) -> bool {
-        self.data.usFlags.0 & MOUSE_VIRTUAL_DESKTOP.0 == 0
+        self.raw.usFlags.0 & MOUSE_VIRTUAL_DESKTOP.0 == 0
     }
 
     #[inline]
     pub fn is_attributes_changed(&self) -> bool {
-        self.data.usFlags.0 & MOUSE_ATTRIBUTES_CHANGED.0 == 0
+        self.raw.usFlags.0 & MOUSE_ATTRIBUTES_CHANGED.0 == 0
     }
 
     #[inline]
     pub fn is_move_nocoalesce(&self) -> bool {
-        self.data.usFlags.0 & MOUSE_MOVE_NOCOALESCE.0 == 0
+        self.raw.usFlags.0 & MOUSE_MOVE_NOCOALESCE.0 == 0
     }
 
     #[inline]
     pub fn last_x(&self) -> i32 {
-        self.data.lLastX
+        self.raw.lLastX
     }
 
     #[inline]
     pub fn last_y(&self) -> i32 {
-        self.data.lLastY
+        self.raw.lLastY
     }
 
     #[inline]
     pub fn extra_information(&self) -> u32 {
-        self.data.ulExtraInformation
+        self.raw.ulExtraInformation
     }
 
     #[inline]
     pub fn flags_and_data(&self) -> &RAWMOUSE_0_0 {
-        unsafe { &self.data.Anonymous.Anonymous }
+        unsafe { &self.raw.Anonymous.Anonymous }
     }
 
     #[inline]
@@ -176,11 +168,17 @@ impl Mouse {
         self.flags_and_data().usButtonFlags & (RI_MOUSE_BUTTON_5_UP as u16) != 0
     }
 
+    /// The wheel delta is stored in [Self::button_data].
+    /// A positive value indicates that the wheel was rotated forward, away from the user;
+    /// a negative value indicates that the wheel was rotated backward, toward the user.
     #[inline]
     pub fn is_wheel(&self) -> bool {
         self.flags_and_data().usButtonFlags & (RI_MOUSE_WHEEL as u16) != 0
     }
 
+    /// The wheel delta is stored in [Self::button_data].
+    /// A positive value indicates that the wheel was rotated to the right, away from the user;
+    /// a negative value indicates that the wheel was rotated to the left, toward the user.
     #[inline]
     pub fn is_horizontal_wheel(&self) -> bool {
         self.flags_and_data().usButtonFlags & (RI_MOUSE_HWHEEL as u16) != 0
@@ -188,74 +186,124 @@ impl Mouse {
 }
 
 /// [see also](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawhid)
-#[repr(C)]
-#[derive(Clone)]
-pub struct HID {
-    pub header: RAWINPUTHEADER,
-    pub data: RAWHID,
+pub struct HID<'a> {
+    pub raw: &'a [u8],
 }
 
-impl HID {
+impl<'a> HID<'a> {
     #[inline]
     pub fn per_input_size(&self) -> u32 {
-        self.data.dwSizeHid
+        self.as_raw_hid().dwSizeHid
     }
 
     #[inline]
     pub fn count(&self) -> u32 {
-        self.data.dwCount
+        self.as_raw_hid().dwCount
+    }
+
+    #[inline]
+    pub fn data(&self) -> &[u8] {
+        let offset = size_of::<u32>() * 2;
+        unsafe { self.raw.get(offset..).unwrap_unchecked() }
+    }
+}
+
+impl<'a> HID<'a> {
+    fn as_raw_hid(&self) -> &RAWHID {
+        unsafe { &*(self.raw.as_ptr() as *const RAWHID) }
     }
 }
 
 /// [see also](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawinput)
-#[derive(Clone)]
-pub enum RawInput {
-    Keyboard(Keyboard),
-    Mouse(Mouse),
-    HID(HID),
+pub enum RawData<'a> {
+    Keyboard(Keyboard<'a>),
+    Mouse(Mouse<'a>),
+    HID(HID<'a>),
 }
 
-impl RawInput {
-    /// returns None if msg.message is not WM_INPUT
-    pub fn from_msg(msg: &MSG) -> Option<Self> {
+/// [see also](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawinput)
+#[derive(Debug)]
+pub struct RawInputBufReader {
+    buf: Box<[u8]>,
+}
+
+impl RawInputBufReader {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            buf: vec![0; size_of::<RAWINPUT>().next_power_of_two()].into_boxed_slice(),
+        }
+    }
+
+    /// `msg` should comes from `GetMessage` or `PeekMessage`.
+    ///
+    /// returns `None` if `msg.message` is not `WM_INPUT`
+    pub fn read_from_msg(&mut self, msg: &MSG) -> Option<RawData<'_>> {
         if msg.message != WM_INPUT {
             return None;
         }
-
-        let RAWINPUT { header, data } = {
-            let mut raw_input = MaybeUninit::<RAWINPUT>::uninit();
-            let mut size = std::mem::size_of::<RAWINPUT>() as _;
-            let header_size = std::mem::size_of::<RAWINPUTHEADER>() as _;
-            let r = unsafe {
-                GetRawInputData(
-                    HRAWINPUT(msg.lParam.0 as _),
-                    RID_INPUT,
-                    Some(raw_input.as_mut_ptr() as _),
-                    &mut size,
-                    header_size,
-                )
-            };
-            if r == u32::MAX {
-                panic_from_win32();
-            }
-            unsafe { raw_input.assume_init() }
+        let mut size = size_of::<RAWINPUT>() as _;
+        let header_size = size_of::<RAWINPUTHEADER>() as _;
+        let r = unsafe {
+            GetRawInputData(
+                HRAWINPUT(msg.lParam.0 as _),
+                RID_INPUT,
+                Some(self.buf.as_mut_ptr() as _),
+                &mut size,
+                header_size,
+            )
         };
-        let r = match RID_DEVICE_INFO_TYPE(header.dwType) {
-            RIM_TYPEKEYBOARD => Self::Keyboard(Keyboard {
-                header,
-                data: unsafe { data.keyboard },
+        if r == u32::MAX {
+            panic_from_win32();
+        }
+        let data = match RID_DEVICE_INFO_TYPE(self.header().dwType) {
+            RIM_TYPEKEYBOARD => RawData::Keyboard(Keyboard {
+                raw: unsafe { &self.raw_data().keyboard },
             }),
-            RIM_TYPEMOUSE => Self::Mouse(Mouse {
-                header,
-                data: unsafe { data.mouse },
+            RIM_TYPEMOUSE => RawData::Mouse(Mouse {
+                raw: unsafe { &self.raw_data().mouse },
             }),
-            RIM_TYPEHID => Self::HID(HID {
-                header,
-                data: unsafe { data.hid },
-            }),
+            RIM_TYPEHID => {
+                let mut size = self.header().dwSize;
+                if self.buf.len() < size as usize {
+                    self.buf = vec![0; (size as usize).next_power_of_two()].into_boxed_slice();
+                }
+                let r = unsafe {
+                    GetRawInputData(
+                        HRAWINPUT(msg.lParam.0 as _),
+                        RID_INPUT,
+                        Some(self.buf.as_mut_ptr() as _),
+                        &mut size,
+                        header_size,
+                    )
+                };
+                if r == u32::MAX {
+                    panic_from_win32();
+                }
+                let offset = std::mem::offset_of!(RAWINPUT, data);
+                let raw = unsafe { self.buf.get(offset..).unwrap_unchecked() };
+                RawData::HID(HID { raw })
+            }
             _ => unsafe { std::hint::unreachable_unchecked() },
         };
-        Some(r)
+        Some(data)
+    }
+}
+
+impl RawInputBufReader {
+    #[inline(always)]
+    fn header(&self) -> &RAWINPUTHEADER {
+        &self.as_raw_input().header
+    }
+
+    #[inline(always)]
+    fn raw_data(&self) -> &RAWINPUT_0 {
+        &self.as_raw_input().data
+    }
+
+    #[inline(always)]
+    fn as_raw_input(&self) -> &RAWINPUT {
+        unsafe { &*(self.buf.as_ptr() as *const RAWINPUT) }
     }
 }
 
