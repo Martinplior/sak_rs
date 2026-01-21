@@ -18,14 +18,14 @@ enum Task {
 struct RawAsyncThread(JoinHandle<()>);
 
 impl RawAsyncThread {
-    fn new(task_receiver: MpmcReceiver<Task>) -> (Self, Waker) {
+    fn new(
+        task_receiver: MpmcReceiver<Task>,
+        builder: std::thread::Builder,
+    ) -> std::io::Result<(Self, Waker)> {
         let (waker_sender, waker_receiver) = spsc::once();
-
-        let join_handle =
-            std::thread::spawn(move || Self::thread_main(task_receiver, waker_sender));
-
+        let join_handle = builder.spawn(move || Self::thread_main(task_receiver, waker_sender))?;
         let waker = waker_receiver.recv();
-        (Self(join_handle), waker)
+        Ok((Self(join_handle), waker))
     }
 
     /// before [`join`](Self::join), ensure that this worker can receive a [`Task::Exit`].
@@ -96,13 +96,17 @@ impl Default for AsyncThread {
 
 impl AsyncThread {
     pub fn new() -> Self {
+        Self::with_builder(std::thread::Builder::new()).expect("failed to create thread")
+    }
+
+    pub fn with_builder(builder: std::thread::Builder) -> std::io::Result<Self> {
         let (task_sender, task_receiver) = crate::sync::mpmc::queue::unbounded();
-        let (raw, waker) = RawAsyncThread::new(task_receiver);
-        Self {
+        let (raw, waker) = RawAsyncThread::new(task_receiver, builder)?;
+        Ok(Self {
             raw: Some(raw),
             task_sender,
             waker,
-        }
+        })
     }
 
     #[inline]
@@ -173,19 +177,34 @@ pub struct AsyncThreadPool {
 
 impl AsyncThreadPool {
     pub fn new(num_workers: NonZero<usize>) -> Self {
+        Self::with_builder(num_workers, |_| std::thread::Builder::new())
+            .expect("failed to create thread")
+    }
+
+    pub fn with_builder(
+        num_workers: NonZero<usize>,
+        mut builder: impl FnMut(usize) -> std::thread::Builder,
+    ) -> std::io::Result<Self> {
         let num_workers = num_workers.get();
         let (task_sender, task_receiver) = crate::sync::mpmc::queue::unbounded();
-        let (workers, wakers): (Vec<_>, Vec<_>) = (0..num_workers)
-            .map(|_| RawAsyncThread::new(task_receiver.clone()))
-            .collect();
+        let (mut workers, mut wakers) = (
+            Vec::with_capacity(num_workers),
+            Vec::with_capacity(num_workers),
+        );
+        for index in 0..num_workers {
+            let builder = builder(index);
+            let (worker, waker) = RawAsyncThread::new(task_receiver.clone(), builder)?;
+            workers.push(worker);
+            wakers.push(waker);
+        }
         let workers = workers.into_boxed_slice();
         let wakers = wakers.into_boxed_slice();
-        Self {
+        Ok(Self {
             workers: Some(workers),
             wakers,
             task_sender,
             index_to_wake: Cell::new(0),
-        }
+        })
     }
 
     #[inline]
@@ -264,11 +283,11 @@ mod tests {
             println!("foo({i}) end");
         }
         let worker = AsyncThread::new();
-        (0..500).for_each(|i| worker.add_task(foo(i)));
+        (0..5).for_each(|i| worker.add_task(foo(i)));
         println!("hello!");
         std::thread::sleep(Duration::from_secs(2));
         println!("world!");
-        (500..1_000).for_each(|i| worker.add_task(foo(i)));
+        (5..10).for_each(|i| worker.add_task(foo(i)));
     }
 
     #[test]

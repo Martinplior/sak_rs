@@ -27,14 +27,28 @@ impl TimerThread {
         Self::with_capacity(0)
     }
 
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
+        let builder = std::thread::Builder::new();
+        Self::with_builder_and_capacity(builder, capacity).expect("failed to create thread")
+    }
+
+    #[inline]
+    pub fn with_builder(builder: std::thread::Builder) -> std::io::Result<Self> {
+        Self::with_builder_and_capacity(builder, 0)
+    }
+
+    pub fn with_builder_and_capacity(
+        builder: std::thread::Builder,
+        capacity: usize,
+    ) -> std::io::Result<Self> {
         let (task_sender, task_receiver) = crossbeam_channel::unbounded();
         let join_handle =
-            std::thread::spawn(move || Self::thread_main(task_receiver, NonZero::new(capacity)));
-        Self {
+            builder.spawn(move || Self::thread_main(task_receiver, NonZero::new(capacity)))?;
+        Ok(Self {
             join_handle: Some(join_handle),
             task_sender,
-        }
+        })
     }
 
     #[inline]
@@ -98,6 +112,7 @@ impl TimerThread {
         }
     }
 
+    #[inline]
     fn send(&self, timer: (Instant, TimerTask)) {
         self.task_sender.send(timer).expect("unreachable");
     }
@@ -135,5 +150,8 @@ mod tests {
                 });
             }
         }
+        timer_thread.join().unwrap();
+        let elapsed = instant_now.elapsed();
+        println!("elapsed: {:#?}", elapsed);
     }
 }

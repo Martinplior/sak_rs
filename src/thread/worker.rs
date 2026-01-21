@@ -4,23 +4,26 @@ use crossbeam_channel::{Receiver as MpmcReceiver, Sender as MpmcSender};
 
 use crate::sync::spsc::{self, OnceReceiver};
 
-pub(super) enum Task {
+enum Task {
     Task(Box<dyn FnOnce() + Send>),
     Exit,
 }
 
-pub(super) struct RawWorkerThread(JoinHandle<()>);
+struct RawWorkerThread(JoinHandle<()>);
 
 impl RawWorkerThread {
-    pub(super) fn new(task_receiver: MpmcReceiver<Task>) -> Self {
-        let join_handle = std::thread::spawn(|| Self::thread_main(task_receiver));
-        Self(join_handle)
+    fn new(
+        task_receiver: MpmcReceiver<Task>,
+        builder: std::thread::Builder,
+    ) -> std::io::Result<Self> {
+        let join_handle = builder.spawn(|| Self::thread_main(task_receiver))?;
+        Ok(Self(join_handle))
     }
 
     /// before [`join`](Self::join), ensure that this worker can receive a [`Task::Exit`].
     ///
     /// othewise `join` will block forever...
-    pub(super) fn join(self) -> std::thread::Result<()> {
+    fn join(self) -> std::thread::Result<()> {
         self.0.join()
     }
 }
@@ -51,10 +54,15 @@ impl Default for WorkerThread {
 }
 
 impl WorkerThread {
+    #[inline]
     pub fn new() -> Self {
+        Self::with_builder(std::thread::Builder::new()).expect("failed to spawn thread")
+    }
+
+    pub fn with_builder(builder: std::thread::Builder) -> std::io::Result<Self> {
         let (task_sender, task_receiver) = crossbeam_channel::unbounded();
-        let raw = Some(RawWorkerThread::new(task_receiver));
-        Self { raw, task_sender }
+        let raw = Some(RawWorkerThread::new(task_receiver, builder)?);
+        Ok(Self { raw, task_sender })
     }
 
     #[inline]
@@ -77,12 +85,14 @@ impl WorkerThread {
         self.send(Task::Task(task));
     }
 
+    #[inline]
     pub fn join(mut self) -> std::thread::Result<()> {
         unsafe { self.join_by_ref().unwrap_unchecked() }
     }
 }
 
 impl WorkerThread {
+    #[inline]
     fn send(&self, task: Task) {
         self.task_sender.send(task).expect("unreachable");
     }
@@ -107,16 +117,26 @@ pub struct ThreadPool {
 }
 
 impl ThreadPool {
+    #[inline]
     pub fn new(num_workers: NonZero<usize>) -> Self {
+        Self::with_builder(num_workers, |_| std::thread::Builder::new())
+            .expect("failed to create thread")
+    }
+
+    pub fn with_builder(
+        num_workers: NonZero<usize>,
+        mut builder: impl FnMut(usize) -> std::thread::Builder,
+    ) -> std::io::Result<Self> {
         let num_workers = num_workers.get();
         let (task_sender, task_receiver) = crossbeam_channel::unbounded();
-        let workers: Box<_> = (0..num_workers)
-            .map(|_| RawWorkerThread::new(task_receiver.clone()))
-            .collect();
-        Self {
-            workers: Some(workers),
-            task_sender,
+        let mut workers = Vec::with_capacity(num_workers);
+        for index in 0..num_workers {
+            workers.push(RawWorkerThread::new(task_receiver.clone(), builder(index))?);
         }
+        Ok(Self {
+            workers: Some(workers.into_boxed_slice()),
+            task_sender,
+        })
     }
 
     #[inline]
@@ -144,12 +164,14 @@ impl ThreadPool {
         unsafe { self.workers.as_ref().unwrap_unchecked() }.len()
     }
 
+    #[inline]
     pub fn join(mut self) -> std::thread::Result<()> {
         unsafe { self.join_by_ref().unwrap_unchecked() }
     }
 }
 
 impl ThreadPool {
+    #[inline]
     fn send(&self, task: Task) {
         self.task_sender.send(task).expect("unreachable");
     }
