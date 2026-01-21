@@ -1,5 +1,7 @@
 use std::{collections::BinaryHeap as Heap, time::Instant};
 
+use crate::thread::precise_sleep;
+
 pub type TimerTaskFn = dyn FnOnce(&mut TimerPool) + Send + 'static;
 
 struct Timer {
@@ -82,15 +84,13 @@ impl TimerPool {
         Some(task)
     }
 
-    /// if no timer arrived, call [`std::thread::sleep`] until the first timer arrived.
+    /// if no timer arrived, call [`crate::thread::precise_sleep`] until the first timer arrived.
     #[inline]
     pub fn sleep_until_available(&self) {
         self.peek().map(|deadline| {
-            let instant_now = Instant::now();
-            if &instant_now < deadline {
-                let duration = *deadline - instant_now;
-                std::thread::sleep(duration);
-            }
+            deadline
+                .checked_duration_since(Instant::now())
+                .map(|d| precise_sleep(d))
         });
     }
 
@@ -123,5 +123,7 @@ mod tests {
                 task(&mut timer_pool);
             }
         }
+        let elapsed = instant_now.elapsed();
+        println!("elapsed: {:#?}", elapsed);
     }
 }
