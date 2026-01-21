@@ -203,8 +203,8 @@ impl<'a> HID<'a> {
 
     #[inline]
     pub fn data(&self) -> &[u8] {
-        let offset = size_of::<u32>() * 2;
-        unsafe { self.raw.get(offset..).unwrap_unchecked() }
+        const OFFSET: usize = std::mem::offset_of!(RAWHID, bRawData);
+        unsafe { self.raw.get(OFFSET..).unwrap_unchecked() }
     }
 }
 
@@ -231,7 +231,7 @@ impl RawInputBufReader {
     #[inline]
     pub fn new() -> Self {
         Self {
-            buf: vec![0; size_of::<RAWINPUT>().next_power_of_two()].into_boxed_slice(),
+            buf: vec![0; size_of::<RAWINPUT>()].into_boxed_slice(),
         }
     }
 
@@ -243,14 +243,14 @@ impl RawInputBufReader {
             return None;
         }
         let mut size = size_of::<RAWINPUT>() as _;
-        let header_size = size_of::<RAWINPUTHEADER>() as _;
+        const HEADER_SIZE: u32 = size_of::<RAWINPUTHEADER>() as _;
         let r = unsafe {
             GetRawInputData(
                 HRAWINPUT(msg.lParam.0 as _),
                 RID_INPUT,
                 Some(self.buf.as_mut_ptr() as _),
                 &mut size,
-                header_size,
+                HEADER_SIZE,
             )
         };
         if r == u32::MAX {
@@ -274,14 +274,14 @@ impl RawInputBufReader {
                         RID_INPUT,
                         Some(self.buf.as_mut_ptr() as _),
                         &mut size,
-                        header_size,
+                        HEADER_SIZE,
                     )
                 };
                 if r == u32::MAX {
                     panic_from_win32();
                 }
-                let offset = std::mem::offset_of!(RAWINPUT, data);
-                let raw = unsafe { self.buf.get(offset..).unwrap_unchecked() };
+                const OFFSET: usize = std::mem::offset_of!(RAWINPUT, data);
+                let raw = unsafe { self.buf.get(OFFSET..).unwrap_unchecked() };
                 RawData::HID(HID { raw })
             }
             _ => unsafe { std::hint::unreachable_unchecked() },
@@ -358,12 +358,7 @@ pub mod device {
             dwFlags: flags,
             hwndTarget: hwnd,
         };
-        unsafe {
-            RegisterRawInputDevices(
-                &[raw_input_device],
-                std::mem::size_of::<RAWINPUTDEVICE>() as _,
-            )
-        }
-        .expect("unreachable");
+        unsafe { RegisterRawInputDevices(&[raw_input_device], size_of::<RAWINPUTDEVICE>() as _) }
+            .expect("unreachable");
     }
 }
