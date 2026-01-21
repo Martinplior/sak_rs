@@ -25,15 +25,17 @@ where
 }
 
 pub struct Allocators {
-    memory:
-        LazyLock<Arc<StandardMemoryAllocator>, Box<dyn FnOnce() -> Arc<StandardMemoryAllocator>>>,
+    memory: LazyLock<
+        Arc<StandardMemoryAllocator>,
+        Box<dyn FnOnce() -> Arc<StandardMemoryAllocator> + Send>,
+    >,
     command_buffer: LazyLock<
         Arc<StandardCommandBufferAllocator>,
-        Box<dyn FnOnce() -> Arc<StandardCommandBufferAllocator>>,
+        Box<dyn FnOnce() -> Arc<StandardCommandBufferAllocator> + Send>,
     >,
     descriptor_set: LazyLock<
         Arc<StandardDescriptorSetAllocator>,
-        Box<dyn FnOnce() -> Arc<StandardDescriptorSetAllocator>>,
+        Box<dyn FnOnce() -> Arc<StandardDescriptorSetAllocator> + Send>,
     >,
 }
 
@@ -95,8 +97,8 @@ struct Queues {
 pub struct Context {
     instance: Arc<Instance>,
     device: Arc<Device>,
+    allocators: Arc<Allocators>,
     queues: Queues,
-    allocators: Allocators,
 }
 
 impl Context {
@@ -117,7 +119,7 @@ impl Context {
             .expect("No physical device available");
         let (device, queues) =
             create_device_and_queues(physical_device, device_extensions, device_features);
-        let allocators = Allocators::new(device.clone());
+        let allocators = Arc::new(Allocators::new(device.clone()));
         Self {
             instance,
             device,
@@ -170,7 +172,7 @@ impl Context {
     }
 
     #[inline]
-    pub fn allocators(&self) -> &Allocators {
+    pub fn allocators(&self) -> &Arc<Allocators> {
         &self.allocators
     }
 }

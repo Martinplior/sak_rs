@@ -5,12 +5,10 @@ use parking_lot::Mutex;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use vulkano::{
     Validated, VulkanError,
-    command_buffer::{CommandBufferExecFuture, allocator::StandardCommandBufferAllocator},
-    descriptor_set::allocator::StandardDescriptorSetAllocator,
+    command_buffer::CommandBufferExecFuture,
     device::{Device, Queue},
     format::Format,
     image::Image,
-    memory::allocator::StandardMemoryAllocator,
     pipeline::graphics::color_blend::{AttachmentBlend, BlendFactor, BlendOp},
     render_pass::{Framebuffer, RenderPass},
     swapchain::{
@@ -24,7 +22,10 @@ use vulkano::{
 };
 
 use crate::{
-    graphics::vulkan::{context::Context, renderer::command_builder::CommandBuilder},
+    graphics::vulkan::{
+        context::{Allocators, Context},
+        renderer::command_builder::CommandBuilder,
+    },
     sync::spsc::OnceReceiver,
     thread::WorkerThread,
 };
@@ -55,39 +56,6 @@ type FenceFuture = FenceSignalFuture<
     >,
 >;
 
-#[derive(Debug, Clone)]
-pub struct Allocators {
-    memory: Arc<StandardMemoryAllocator>,
-    command_buffer: Arc<StandardCommandBufferAllocator>,
-    descriptor_set: Arc<StandardDescriptorSetAllocator>,
-}
-
-impl Allocators {
-    fn new(context: &Context) -> Self {
-        let allocators = context.allocators();
-        Self {
-            memory: allocators.memory().clone(),
-            command_buffer: allocators.command_buffer().clone(),
-            descriptor_set: allocators.descriptor_set().clone(),
-        }
-    }
-
-    #[inline]
-    pub fn command_buffer(&self) -> &Arc<StandardCommandBufferAllocator> {
-        &self.command_buffer
-    }
-
-    #[inline]
-    pub fn descriptor_set(&self) -> &Arc<StandardDescriptorSetAllocator> {
-        &self.descriptor_set
-    }
-
-    #[inline]
-    pub fn memory(&self) -> &Arc<StandardMemoryAllocator> {
-        &self.memory
-    }
-}
-
 enum RecreateSwapchainType {
     Size([u32; 2]),
     Vsync(bool),
@@ -97,7 +65,7 @@ struct Shared {
     window_inner_size: Box<dyn Fn() -> [u32; 2] + Send + Sync>,
     queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
-    allocators: Allocators,
+    allocators: Arc<Allocators>,
     recreate_swapchain_queue: SegQueue<RecreateSwapchainType>,
 }
 
@@ -166,7 +134,7 @@ impl SharedMut {
         };
 
         let mut command_builder = CommandBuilder::new(
-            allocators.command_buffer.clone(),
+            allocators.command_buffer().clone(),
             &self.swapchain,
             queue,
             self.framebuffers
@@ -306,7 +274,7 @@ impl Renderer {
             desire_image_format,
             desire_image_count,
         );
-        let allocators = Allocators::new(context);
+        let allocators = context.allocators().clone();
         let render_pass = render_pass::create(device.clone(), &swapchain);
         let framebuffers = framebuffers::create(&swapchain_images, &render_pass);
         let fences = (0..swapchain_images.len()).map(|_| None).collect();
@@ -327,7 +295,10 @@ impl Renderer {
             });
             Arc::new((shared, shared_mut))
         };
-        let render_worker = WorkerThread::new();
+        let render_worker = {
+            let builder = std::thread::Builder::new().name("render".into());
+            WorkerThread::with_builder(builder).expect("failed to create render thread")
+        };
         Self {
             shared,
             render_worker,
@@ -352,7 +323,7 @@ impl Renderer {
     }
 
     #[inline]
-    pub fn allocators(&self) -> &Allocators {
+    pub fn allocators(&self) -> &Arc<Allocators> {
         &self.shared.0.allocators
     }
 
