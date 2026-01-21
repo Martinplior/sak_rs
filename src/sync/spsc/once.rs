@@ -128,7 +128,7 @@ impl<T> OnceReceiver<T> {
     }
 
     /// Receive the one-time value inplace with timeout.
-    pub fn try_recv_timeont_inplace(
+    pub fn try_recv_timeout_inplace(
         this: &mut Option<Self>,
         timeout: std::time::Duration,
     ) -> Option<T> {
