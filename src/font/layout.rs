@@ -10,12 +10,12 @@ pub struct LineLayoutMetrics {
 
 pub trait LineLayoutLibrary {
     /// returns `None` if the character is not supported by the library.
-    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics>;
+    fn metrics(&self, ch: char, pt: f32) -> Option<LineLayoutMetrics>;
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct CachedLineLayout {
-    pub height_unscaled: f32,
+    pub scale_factor: f32,
     pub metrics_unscaled: LineLayoutMetrics,
     pub outline_bounds_unscaled: ab_glyph::Rect,
 }
@@ -23,14 +23,14 @@ pub struct CachedLineLayout {
 pub trait CachedLineLayoutLibrary {
     fn get_cache(&self, ch: char) -> Option<&CachedLineLayout>;
 
-    fn glyph_metrics(&self, ch: char, px: f32) -> Option<GlyphMetrics> {
+    fn glyph_metrics(&self, ch: char, pt: f32) -> Option<GlyphMetrics> {
         let CachedLineLayout {
-            height_unscaled,
+            scale_factor,
             outline_bounds_unscaled,
             ..
         } = self.get_cache(ch)?;
         let ab_glyph::Rect { min, max } = *outline_bounds_unscaled;
-        let scale = px / height_unscaled;
+        let scale = scale_factor * pt;
         let x_min = (min.x * scale).floor() as i32;
         let x_max = (max.x * scale).ceil() as i32;
         let y_min = (min.y * -scale).floor() as i32;
@@ -47,13 +47,13 @@ impl<T> LineLayoutLibrary for T
 where
     T: CachedLineLayoutLibrary,
 {
-    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics> {
+    fn metrics(&self, ch: char, pt: f32) -> Option<LineLayoutMetrics> {
         let CachedLineLayout {
-            height_unscaled,
+            scale_factor,
             metrics_unscaled,
             ..
         } = self.get_cache(ch)?;
-        let scale = px / height_unscaled;
+        let scale = scale_factor * pt;
         Some(LineLayoutMetrics {
             ascent: metrics_unscaled.ascent * scale,
             descent: metrics_unscaled.descent * scale,
@@ -429,26 +429,26 @@ impl MultiLineLayout {
 }
 
 impl LineLayoutLibrary for Font {
-    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics> {
+    fn metrics(&self, ch: char, pt: f32) -> Option<LineLayoutMetrics> {
         if !self.has_glyph(ch) {
             return None;
         }
         Some(LineLayoutMetrics {
-            ascent: self.ascent(px),
-            descent: self.descent(px),
-            h_advance: self.h_advance(ch, px),
-            h_side_bearing: self.h_side_bearing(ch, px),
+            ascent: self.ascent(pt),
+            descent: self.descent(pt),
+            h_advance: self.h_advance(ch, pt),
+            h_side_bearing: self.h_side_bearing(ch, pt),
         })
     }
 }
 
 impl LineLayoutLibrary for FontFallbackList {
-    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics> {
+    fn metrics(&self, ch: char, pt: f32) -> Option<LineLayoutMetrics> {
         self.font(ch).map(|font| LineLayoutMetrics {
-            ascent: font.ascent(px),
-            descent: font.descent(px),
-            h_advance: font.h_advance(ch, px),
-            h_side_bearing: font.h_side_bearing(ch, px),
+            ascent: font.ascent(pt),
+            descent: font.descent(pt),
+            h_advance: font.h_advance(ch, pt),
+            h_side_bearing: font.h_side_bearing(ch, pt),
         })
     }
 }
