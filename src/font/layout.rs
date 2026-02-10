@@ -1,4 +1,4 @@
-use super::{Font, FontFallbackList};
+use super::{Font, FontFallbackList, GlyphMetrics};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct LineLayoutMetrics {
@@ -11,6 +11,56 @@ pub struct LineLayoutMetrics {
 pub trait LineLayoutLibrary {
     /// returns `None` if the character is not supported by the library.
     fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics>;
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct CachedLineLayout {
+    pub height_unscaled: f32,
+    pub metrics_unscaled: LineLayoutMetrics,
+    pub outline_bounds_unscaled: ab_glyph::Rect,
+}
+
+pub trait CachedLineLayoutLibrary {
+    fn get_cache(&self, ch: char) -> Option<&CachedLineLayout>;
+
+    fn glyph_metrics(&self, ch: char, px: f32) -> Option<GlyphMetrics> {
+        let CachedLineLayout {
+            height_unscaled,
+            outline_bounds_unscaled,
+            ..
+        } = self.get_cache(ch)?;
+        let ab_glyph::Rect { min, max } = *outline_bounds_unscaled;
+        let scale = px / height_unscaled;
+        let x_min = (min.x * scale).floor() as i32;
+        let x_max = (max.x * scale).ceil() as i32;
+        let y_min = (min.y * -scale).floor() as i32;
+        let y_max = (max.y * -scale).ceil() as i32;
+        Some(GlyphMetrics {
+            y_offset: y_min,
+            width: (x_max - x_min) as u32,
+            height: (y_max - y_min) as u32,
+        })
+    }
+}
+
+impl<T> LineLayoutLibrary for T
+where
+    T: CachedLineLayoutLibrary,
+{
+    fn metrics(&self, ch: char, px: f32) -> Option<LineLayoutMetrics> {
+        let CachedLineLayout {
+            height_unscaled,
+            metrics_unscaled,
+            ..
+        } = self.get_cache(ch)?;
+        let scale = px / height_unscaled;
+        Some(LineLayoutMetrics {
+            ascent: metrics_unscaled.ascent * scale,
+            descent: metrics_unscaled.descent * scale,
+            h_advance: metrics_unscaled.h_advance * scale,
+            h_side_bearing: metrics_unscaled.h_side_bearing * scale,
+        })
+    }
 }
 
 /// `(0, 0)` is the left-most point of the baseline.
