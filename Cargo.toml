@@ -1,37 +1,64 @@
 [package]
 name = "sak_rs"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 
 [features]
 # default = ["all"]
 
 all = [
+    "async",
+    "cell",
+    "collections",
+    "collections_adapter",
+    "font",
+    "graceful_run",
+    "graphics",
+    "graphics_vulkan",
+    "math",
+    "message_dialog",
     "os",
     "os_windows",
     "os_windows_input",
     "sync",
-    "cell",
-    "collections",
-    "collections_adapter",
-    "async",
     "thread",
     "thread_async",
-    "message_dialog",
-    "graceful_run",
-    "graphics",
-    "graphics_vulkan",
-    "font",
 ]
+
+async = ["sync", "thread"]
+
+cell = []
+
+collections = []
+collections_adapter = ["collections"]
+
+font = [
+    "dep:ab_glyph",
+    "dep:font-kit",
+    "dep:thiserror",
+    "dep:owned_ttf_parser",
+    "ab_glyph/std",
+    "font-kit/source",
+    "owned_ttf_parser/std",
+]
+
+graceful_run = ["message_dialog"]
+
+graphics = []
+graphics_vulkan = ["graphics", "thread", "dep:vulkano", "dep:raw-window-handle"]
+
+math = []
+
+message_dialog = ["dep:rfd"]
 
 os = []
 os_windows = ["os", "dep:windows"]
 os_windows_input = [
     "os_windows",
     "sync",
+    "windows/Win32_Devices_HumanInterfaceDevice",
     "windows/Win32_Foundation",
     "windows/Win32_Graphics_Gdi",
-    "windows/Win32_Devices_HumanInterfaceDevice",
     "windows/Win32_System_LibraryLoader",
     "windows/Win32_UI_Input_KeyboardAndMouse",
     "windows/Win32_UI_WindowsAndMessaging",
@@ -39,45 +66,21 @@ os_windows_input = [
 
 sync = ["dep:parking_lot", "dep:crossbeam-queue", "crossbeam-queue/std", "dep:thiserror"]
 
-cell = []
-
-collections = []
-collections_adapter = ["collections"]
-
-async = ["sync", "thread"]
-
 thread = ["sync", "dep:crossbeam-channel", "crossbeam-channel/std"]
 thread_async = ["thread", "async"]
 
-message_dialog = ["dep:rfd"]
-
-graceful_run = ["message_dialog"]
-
-graphics = []
-graphics_vulkan = ["graphics", "thread", "dep:vulkano", "dep:raw-window-handle"]
-
-font = [
-    "dep:font-kit",
-    "font-kit/source",
-    "dep:owned_ttf_parser",
-    "owned_ttf_parser/std",
-    "dep:ab_glyph",
-    "ab_glyph/std",
-    "dep:thiserror",
-]
-
 [dependencies]
-windows = { version = "0.62.2", default-features = false, optional = true }
-parking_lot = { version = "0.12.5", default-features = false, optional = true }
+ab_glyph = { version = "0.2.32", default-features = false, optional = true }
 crossbeam-channel = { version = "0.5.15", default-features = false, optional = true }
 crossbeam-queue = { version = "0.3.12", default-features = false, optional = true }
-rfd = { version = "0.17.1", default-features = false, optional = true }
-vulkano = { version = "0.35.2", default-features = false, optional = true }
-raw-window-handle = { version = "0.6.2", default-features = false, optional = true }
 font-kit = { version = "0.14.3", default-features = false, optional = true }
 owned_ttf_parser = { version = "0.25.1", default-features = false, optional = true }
-ab_glyph = { version = "0.2.32", default-features = false, optional = true }
-thiserror = { version = "2.0.17", default-features = false, optional = true }
+parking_lot = { version = "0.12.5", default-features = false, optional = true }
+raw-window-handle = { version = "0.6.2", default-features = false, optional = true }
+rfd = { version = "0.17.2", default-features = false, optional = true }
+thiserror = { version = "2.0.18", default-features = false, optional = true }
+vulkano = { version = "0.35.2", default-features = false, optional = true }
+windows = { version = "0.62.2", default-features = false, optional = true }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
