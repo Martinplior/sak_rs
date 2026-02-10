@@ -25,6 +25,9 @@ pub mod graphics;
 #[cfg(feature = "font")]
 pub mod font;
 
+#[cfg(feature = "math")]
+pub mod math;
+
 pub mod assert;
 pub mod slice;
 
