@@ -21,9 +21,7 @@ pub fn precise_sleep(duration: Duration) {
 #[inline]
 pub fn precise_sleep_with_spin_threshold(duration: Duration, spin_threshold: Duration) {
     let deadline = Instant::now() + duration;
-    duration
-        .checked_sub(spin_threshold)
-        .map(|d| std::thread::sleep(d));
+    duration.checked_sub(spin_threshold).map(std::thread::sleep);
     spin_sleep_until(deadline);
 }
 

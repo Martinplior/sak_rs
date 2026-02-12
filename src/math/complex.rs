@@ -48,14 +48,14 @@ impl<T> From<Complex2<T>> for Vector<T, 2> {
 impl<T> From<[T; 2]> for Complex2<T> {
     #[inline(always)]
     fn from(v: [T; 2]) -> Self {
-        Self(v.into())
+        Self(v)
     }
 }
 
 impl<T> From<Complex2<T>> for [T; 2] {
     #[inline(always)]
     fn from(c: Complex2<T>) -> Self {
-        c.0.into()
+        c.0
     }
 }
 
@@ -95,8 +95,8 @@ where
 
     #[inline(always)]
     fn add(self, other: Self) -> Self::Output {
-        let [x1, y1] = self.0.into();
-        let [x2, y2] = other.0.into();
+        let [x1, y1] = self.0;
+        let [x2, y2] = other.0;
         Self::new([x1 + x2, y1 + y2])
     }
 }
@@ -121,8 +121,8 @@ where
 
     #[inline(always)]
     fn sub(self, other: Self) -> Self::Output {
-        let [x1, y1] = self.0.into();
-        let [x2, y2] = other.0.into();
+        let [x1, y1] = self.0;
+        let [x2, y2] = other.0;
         Self::new([x1 - x2, y1 - y2])
     }
 }
@@ -151,8 +151,8 @@ where
 
     #[inline(always)]
     fn mul(self, other: Self) -> Self::Output {
-        let [x1, y1] = self.0.into();
-        let [x2, y2] = other.0.into();
+        let [x1, y1] = self.0;
+        let [x2, y2] = other.0;
         let real = &x1 * &x2 - &y1 * &y2;
         let imag = x1 * y2 + y1 * x2;
         Self::new([real, imag])
@@ -189,8 +189,8 @@ where
 
     #[inline(always)]
     fn div(self, other: Self) -> Self::Output {
-        let [x1, y1] = self.0.into();
-        let [x2, y2] = other.0.into();
+        let [x1, y1] = self.0;
+        let [x2, y2] = other.0;
         let denominator = &x2 * &x2 + &y2 * &y2;
         let real_numerator = &x1 * &x2 + &y1 * &y2;
         let imag_numerator = y1 * x2 - x1 * y2;
@@ -220,7 +220,7 @@ where
 
     #[inline(always)]
     fn neg(self) -> Self::Output {
-        let [x, y] = self.0.into();
+        let [x, y] = self.0;
         Self::new([-x, -y])
     }
 }

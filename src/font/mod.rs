@@ -81,7 +81,7 @@ mod tests {
         let text = "🦌😡🤔abc ";
         let mut sdf_generator = SdfGenerator::new(8, 8.0, 0.25);
 
-        let font_size = 64.0;
+        let font_size = 32.0;
 
         text.chars()
             .inspect(|&ch| {

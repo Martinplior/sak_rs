@@ -184,7 +184,7 @@ where
         let r = self
             .0
             .into_iter()
-            .zip(other.0.into_iter())
+            .zip(other.0)
             .map(|(a, b)| a * b)
             .reduce(|acc, x| acc + x);
         unsafe { r.unwrap_unchecked() }

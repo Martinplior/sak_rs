@@ -86,6 +86,7 @@ windows = { version = "0.62.2", default-features = false, optional = true }
 unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
+new_without_default = "allow"
 obfuscated_if_else = "allow"
 option_map_unit_fn = "allow"
 unwrap_used = "warn"

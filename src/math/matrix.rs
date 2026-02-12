@@ -72,11 +72,17 @@ impl<T, const ROWS: usize, const COLS: usize> Matrix<T, ROWS, COLS> {
         self.0.get_mut(row)?.get_mut(col)
     }
 
+    /// # Safety
+    ///
+    /// `row` and `col` must be valid indices in the matrix.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, row: usize, col: usize) -> &T {
         unsafe { self.0.get_unchecked(row).get_unchecked(col) }
     }
 
+    /// # Safety
+    ///
+    /// `row` and `col` must be valid indices in the matrix.
     #[inline(always)]
     pub unsafe fn get_unchecked_mut(&mut self, row: usize, col: usize) -> &mut T {
         unsafe { self.0.get_unchecked_mut(row).get_unchecked_mut(col) }

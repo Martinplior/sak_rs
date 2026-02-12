@@ -90,7 +90,7 @@ impl TimerPool {
         self.peek().map(|deadline| {
             deadline
                 .checked_duration_since(Instant::now())
-                .map(|d| precise_sleep(d))
+                .map(precise_sleep)
         });
     }
 
