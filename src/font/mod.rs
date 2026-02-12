@@ -13,7 +13,7 @@ pub fn print_bitmap(bitmap: &[u8], width: usize) {
     if width == 0 {
         return;
     }
-    debug_assert_eq!(bitmap.len() % width, 0);
+    debug_assert!(bitmap.len().is_multiple_of(width));
 
     use std::fmt::Write as _;
 
@@ -49,7 +49,7 @@ mod tests {
         let font_fallback_list = FontFallbackList::new(fonts);
         // let text = "é a";
         let text = "🦌😡🤔abc ";
-        let font_size = 16.0;
+        let font_size = 64.0;
         text.chars()
             .inspect(|&ch| {
                 dbg!(font_fallback_list.metrics(ch, font_size));
@@ -79,9 +79,12 @@ mod tests {
         let font_fallback_list = FontFallbackList::new(fonts);
         // let text = "é a";
         let text = "🦌😡🤔abc ";
-        let mut sdf_generator = SdfGenerator::new(8, 8.0, 0.25);
 
-        let font_size = 32.0;
+        let font_size: f32 = 64.0;
+        let radius = font_size / 2.0;
+        let cutoff = 0.5;
+        let edge_padding = (radius * (1.0 - cutoff)).ceil() as u32;
+        let mut sdf_generator = SdfGenerator::new(edge_padding, radius, cutoff);
 
         text.chars()
             .inspect(|&ch| {

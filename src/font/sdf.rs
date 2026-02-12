@@ -36,6 +36,14 @@ impl SdfGenerator {
     }
 
     #[inline]
+    pub fn new_recommended(size: f32) -> Self {
+        let radius = size / 4.0;
+        let cutoff = 0.1;
+        let edge_padding = (radius * (1.0 - cutoff)).ceil() as u32;
+        Self::new(edge_padding, radius, cutoff)
+    }
+
+    #[inline]
     pub fn edge_padding(&self) -> u32 {
         self.edge_padding
     }
@@ -79,15 +87,15 @@ impl SdfGenerator {
 
         for y in 0..height {
             for x in 0..width {
-                let a = *unsafe { bitmap.get((y * width + x) as usize).unwrap_unchecked() };
+                let a = *unsafe { bitmap.get_unchecked((y * width + x) as usize) };
                 if a == 0 {
                     continue;
                 }
 
                 let j = ((y + self.edge_padding) * padded_width + x + self.edge_padding) as usize;
 
-                let outer = unsafe { self.grid_outer.get_mut(j).unwrap_unchecked() };
-                let inner = unsafe { self.grid_inner.get_mut(j).unwrap_unchecked() };
+                let outer = unsafe { self.grid_outer.get_unchecked_mut(j) };
+                let inner = unsafe { self.grid_inner.get_unchecked_mut(j) };
                 if a == 255 {
                     *outer = 0.0;
                     *inner = Self::INF;
@@ -116,8 +124,8 @@ impl SdfGenerator {
         let len = (padded_width * padded_height) as usize;
         let data = (0..len)
             .map(|i| {
-                let outer = unsafe { self.grid_outer.get(i).unwrap_unchecked() };
-                let inner = unsafe { self.grid_inner.get(i).unwrap_unchecked() };
+                let outer = unsafe { self.grid_outer.get_unchecked(i) };
+                let inner = unsafe { self.grid_inner.get_unchecked(i) };
                 let d = outer.sqrt() - inner.sqrt();
                 (255.0 - 255.0 * (d / self.radius + self.cutoff))
                     .round()
@@ -176,24 +184,23 @@ impl SdfGenerator {
         let v = &mut self.v;
         let z = &mut self.z;
 
-        *unsafe { v.get_mut(0).unwrap_unchecked() } = 0;
-        *unsafe { z.get_mut(0).unwrap_unchecked() } = -Self::INF;
-        *unsafe { z.get_mut(1).unwrap_unchecked() } = Self::INF;
-        *unsafe { f.get_mut(0).unwrap_unchecked() } =
-            *unsafe { grid.get(offset).unwrap_unchecked() };
+        *unsafe { v.get_unchecked_mut(0) } = 0;
+        *unsafe { z.get_unchecked_mut(0) } = -Self::INF;
+        *unsafe { z.get_unchecked_mut(1) } = Self::INF;
+        *unsafe { f.get_unchecked_mut(0) } = *unsafe { grid.get_unchecked(offset) };
 
         let mut k: isize = 0;
         let mut s: f32;
         for q in 1..length {
-            *unsafe { f.get_mut(q).unwrap_unchecked() } =
-                *unsafe { grid.get(offset + q * stride).unwrap_unchecked() };
+            *unsafe { f.get_unchecked_mut(q) } =
+                *unsafe { grid.get_unchecked(offset + q * stride) };
             let q2 = (q * q) as f32;
             loop {
-                let vk = *unsafe { v.get(k as usize).unwrap_unchecked() } as usize;
-                let fq = *unsafe { f.get(q).unwrap_unchecked() };
-                let fvk = *unsafe { f.get(vk).unwrap_unchecked() };
+                let vk = *unsafe { v.get_unchecked(k as usize) } as usize;
+                let fq = *unsafe { f.get_unchecked(q) };
+                let fvk = *unsafe { f.get_unchecked(vk) };
                 s = (fq - fvk + q2 - (vk * vk) as f32) / (q - vk) as f32 * 0.5;
-                let zk = *unsafe { z.get(k as usize).unwrap_unchecked() };
+                let zk = *unsafe { z.get_unchecked(k as usize) };
                 if s <= zk {
                     k -= 1;
                     if k > -1 {
@@ -204,21 +211,21 @@ impl SdfGenerator {
             }
 
             k += 1;
-            *unsafe { v.get_mut(k as usize).unwrap_unchecked() } = q as u16;
-            *unsafe { z.get_mut(k as usize).unwrap_unchecked() } = s;
-            *unsafe { z.get_mut(k as usize + 1).unwrap_unchecked() } = Self::INF;
+            *unsafe { v.get_unchecked_mut(k as usize) } = q as u16;
+            *unsafe { z.get_unchecked_mut(k as usize) } = s;
+            *unsafe { z.get_unchecked_mut(k as usize + 1) } = Self::INF;
         }
 
         let mut k = 0;
         for q in 0..length {
-            while *unsafe { z.get(k + 1).unwrap_unchecked() } < q as f32 {
+            while *unsafe { z.get_unchecked(k + 1) } < q as f32 {
                 k += 1;
             }
 
-            let vk = *unsafe { v.get(k).unwrap_unchecked() };
+            let vk = *unsafe { v.get_unchecked(k) };
             let qr = q as isize - vk as isize;
-            let g = unsafe { grid.get_mut(offset + q * stride).unwrap_unchecked() };
-            let fvk = *unsafe { f.get(vk as usize).unwrap_unchecked() };
+            let g = unsafe { grid.get_unchecked_mut(offset + q * stride) };
+            let fvk = *unsafe { f.get_unchecked(vk as usize) };
             *g = (qr * qr) as f32 + fvk;
         }
     }
