@@ -53,5 +53,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn t1() {}
+    #[cfg(feature = "graceful_run")]
+    fn t1() {
+        let _ = graceful_run(|| Result::<(), _>::Err("test1").unwrap())
+            .inspect_err(|err| assert!(err.is::<String>()));
+        let _ = graceful_run(|| panic!("test2")).inspect_err(|err| assert!(err.is::<&str>()));
+        let _ = graceful_run(|| std::panic::resume_unwind(Box::new("test3")));
+        let _ = graceful_run(|| std::panic::resume_unwind(Box::new("test4".to_string())));
+        let _ = graceful_run(|| std::panic::resume_unwind(Box::new(42)));
+    }
 }
