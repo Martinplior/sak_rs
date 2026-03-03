@@ -1,3 +1,10 @@
+pub mod command_builder;
+pub mod mipmap;
+
+mod framebuffers;
+mod render_pass;
+mod swapchain;
+
 use std::{any::Any, num::NonZero, sync::Arc};
 
 use crossbeam_queue::SegQueue;
@@ -21,21 +28,12 @@ use vulkano::{
     },
 };
 
-use crate::{
-    graphics::vulkan::{
-        context::{Allocators, Context},
-        renderer::command_builder::CommandBuilder,
-    },
-    sync::spsc::OnceReceiver,
-    thread::WorkerThread,
+use crate::{sync::spsc::OnceReceiver, thread::WorkerThread};
+
+use super::{
+    context::{Allocators, Context},
+    renderer::command_builder::CommandBuilder,
 };
-
-mod framebuffers;
-mod render_pass;
-mod swapchain;
-
-pub mod command_builder;
-pub mod mipmap;
 
 pub const PREMUL_ALPHA: AttachmentBlend = AttachmentBlend {
     color_blend_op: BlendOp::Add,
@@ -327,7 +325,7 @@ impl Renderer {
         &self.shared.0.allocators
     }
 
-    pub fn set_vsync(&mut self, vsync: bool) {
+    pub fn set_vsync(&self, vsync: bool) {
         self.shared
             .0
             .recreate_swapchain_queue
