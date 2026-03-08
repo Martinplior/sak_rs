@@ -2,8 +2,9 @@ pub struct ContextConfig {
     pub instance_descriptor: wgpu::InstanceDescriptor,
     pub target: wgpu::SurfaceTarget<'static>,
     pub power_preference: wgpu::PowerPreference,
-    pub memory_hints: wgpu::MemoryHints,
+    pub device_descriptor: Box<dyn FnMut(&wgpu::Adapter) -> wgpu::DeviceDescriptor>,
 }
+
 pub struct Context {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
@@ -17,7 +18,7 @@ impl Context {
             instance_descriptor,
             target,
             power_preference,
-            memory_hints,
+            mut device_descriptor,
         } = config;
         let instance = wgpu::Instance::new(&instance_descriptor);
         let surface = instance
@@ -32,14 +33,7 @@ impl Context {
             .await
             .expect("failed to find an appropriate adapter");
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: None,
-                required_features: adapter.features(),
-                required_limits: adapter.limits(),
-                memory_hints,
-                experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() },
-                ..Default::default()
-            })
+            .request_device(&device_descriptor(&adapter))
             .await
             .expect("failed to create device and queue");
 
