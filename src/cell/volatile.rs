@@ -1,3 +1,4 @@
+/// A cell that performs volatile reads and writes.
 #[repr(transparent)]
 pub struct VolatileCell<T: Copy>(core::cell::UnsafeCell<T>);
 
