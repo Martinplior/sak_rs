@@ -88,8 +88,7 @@ impl SharedMut {
         }
         let need_set_config = new_size.is_some() || new_vsync.is_some();
         need_set_config.then(|| {
-            let size =
-                new_size.unwrap_or_else(|| [self.surface_config.width, self.surface_config.height]);
+            let size = new_size.unwrap_or([self.surface_config.width, self.surface_config.height]);
             let present_mode = if let Some(v) = new_vsync {
                 if v {
                     wgpu::PresentMode::AutoVsync
@@ -147,7 +146,7 @@ impl Renderer {
             view_formats: vec![],
             desired_maximum_frame_latency,
         };
-        surface.configure(&device, &surface_config);
+        surface.configure(device, &surface_config);
         let clear_color = wgpu::Color::TRANSPARENT;
         let render_worker = {
             let builder = std::thread::Builder::new().name("render".into());
