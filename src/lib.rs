@@ -1,8 +1,5 @@
-#[cfg(feature = "os")]
-pub mod os;
-
-#[cfg(feature = "sync")]
-pub mod sync;
+#[cfg(feature = "async")]
+pub mod async_;
 
 #[cfg(feature = "cell")]
 pub mod cell;
@@ -10,23 +7,26 @@ pub mod cell;
 #[cfg(feature = "collections")]
 pub mod collections;
 
-#[cfg(feature = "async")]
-pub mod async_;
-
-#[cfg(feature = "thread")]
-pub mod thread;
-
-#[cfg(feature = "message_dialog")]
-pub mod message_dialog;
+#[cfg(feature = "font")]
+pub mod font;
 
 #[cfg(feature = "graphics")]
 pub mod graphics;
 
-#[cfg(feature = "font")]
-pub mod font;
-
 #[cfg(feature = "math")]
 pub mod math;
+
+#[cfg(feature = "message_dialog")]
+pub mod message_dialog;
+
+#[cfg(feature = "os")]
+pub mod os;
+
+#[cfg(feature = "sync")]
+pub mod sync;
+
+#[cfg(feature = "thread")]
+pub mod thread;
 
 pub mod assert;
 pub mod slice;
