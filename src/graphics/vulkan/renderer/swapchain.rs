@@ -5,7 +5,7 @@ use vulkano::{
     format::Format,
     image::{Image, ImageUsage},
     instance::Instance,
-    swapchain::{PresentMode, Surface, Swapchain, SwapchainCreateInfo},
+    swapchain::{CompositeAlpha, PresentMode, Surface, Swapchain, SwapchainCreateInfo},
 };
 
 use super::WindowLike;
@@ -26,8 +26,8 @@ pub(crate) fn create(
     let composite_alpha = capabilities
         .supported_composite_alpha
         .into_iter()
-        .next()
-        .expect("Failed to get composite alpha mode");
+        .find(|&alpha| alpha == CompositeAlpha::PreMultiplied)
+        .unwrap_or(CompositeAlpha::Opaque);
     let image_format = {
         let image_formats = physical_device
             .surface_formats(&surface, Default::default())

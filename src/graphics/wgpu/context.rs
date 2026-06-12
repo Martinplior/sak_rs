@@ -20,7 +20,7 @@ impl Context {
             power_preference,
             mut device_descriptor,
         } = config;
-        let instance = wgpu::Instance::new(&instance_descriptor);
+        let instance = wgpu::Instance::new(instance_descriptor);
         let surface = instance
             .create_surface(target)
             .expect("failed to create surface");

@@ -2,6 +2,7 @@ use std::{num::NonZero, sync::Arc};
 
 use crossbeam_queue::SegQueue;
 use parking_lot::Mutex;
+use wgpu::{CompositeAlphaMode, CurrentSurfaceTexture};
 
 use crate::{sync::spsc::OnceReceiver, thread::WorkerThread};
 
@@ -52,11 +53,16 @@ impl SharedMut {
 
         self.set_surface_config_when_need(shared);
 
-        let output = surface
-            .get_current_texture()
-            .expect("failed to acquire next swap chain texture");
-        output.suboptimal.then(|| shared.resize_outdated());
-        let view = output.texture.create_view(&Default::default());
+        let output = surface.get_current_texture();
+        let surface_texture = match output {
+            CurrentSurfaceTexture::Suboptimal(st) => {
+                shared.resize_outdated();
+                st
+            }
+            CurrentSurfaceTexture::Success(st) => st,
+            _ => panic!("failed to acquire next surface texture"),
+        };
+        let view = surface_texture.texture.create_view(&Default::default());
         let mut command_encoder = device.create_command_encoder(&Default::default());
         let mut render_pass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -74,7 +80,7 @@ impl SharedMut {
         drop(render_pass);
         let command_buffer = command_encoder.finish();
         queue.submit([command_buffer]);
-        output.present();
+        surface_texture.present();
     }
 
     fn set_surface_config_when_need(&mut self, shared: &Shared) {
@@ -136,13 +142,20 @@ impl Renderer {
         let size = target_size();
         let desired_maximum_frame_latency =
             desired_maxium_frame_latency.map(|x| x.get()).unwrap_or(2);
+        let alpha_mode = surface
+            .get_capabilities(context.adapter())
+            .alpha_modes
+            .iter()
+            .find(|&mode| mode == &CompositeAlphaMode::PreMultiplied)
+            .cloned()
+            .unwrap_or(CompositeAlphaMode::Opaque);
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: Self::TEXTURE_FORMAT,
             width: size[0],
             height: size[1],
             present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency,
         };
